@@ -1,0 +1,7 @@
+*
+!Dockerfile
+!docker/
+!docker/apache/
+!docker/apache/000-default.conf
+!docker/php/
+!docker/php/local.ini
