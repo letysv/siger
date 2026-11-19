@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -9,6 +10,8 @@ use Illuminate\Database\Eloquent\Relations\HasOne;
 
 class Partida extends Model
 {
+    use HasFactory;
+
     protected $table = 'partidas';
 
     protected $fillable = ['servicio_id', 'partida_origen_id', 'numero_partida', 'servicio_folio_id', 'tipo_servicio_id', 'concepto', 'cantidad_solicitada', 'cantidad_atendida', 'unidad_medida', 'departamento_id', 'observaciones', 'nombre_quien_recibe_material', 'estado_id', 'fecha_inicio', 'fecha_conclusion', 'motivo_cancelacion', 'cancelado_por', 'fecha_cancelacion'];

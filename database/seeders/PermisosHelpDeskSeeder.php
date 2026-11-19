@@ -54,10 +54,12 @@ class PermisosHelpDeskSeeder extends Seeder
         $registrar->forgetCachedPermissions();
 
         try {
-            DB::transaction(function () use ($permisos, $matriz): void {
+            DB::transaction(function () use ($permisos, $matriz, $registrar): void {
                 foreach ($permisos as $permiso) {
                     Permission::findOrCreate($permiso, 'web');
                 }
+
+                $registrar->forgetCachedPermissions();
 
                 foreach ($matriz as $nombre => $autorizados) {
                     $rol = Role::findOrCreate($nombre, 'web');

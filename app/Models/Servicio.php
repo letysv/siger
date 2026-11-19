@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -9,6 +10,8 @@ use Illuminate\Database\Eloquent\Relations\HasOne;
 
 class Servicio extends Model
 {
+    use HasFactory;
+
     protected $table = 'servicios';
 
     protected $fillable = ['numero_oficio', 'fecha_oficio', 'fecha_recepcion', 'ejercicio', 'area_solicitante_id', 'nombre_solicitante', 'dirigido_a', 'asunto', 'descripcion', 'es_via_rapida', 'estado_id', 'usuario_id'];

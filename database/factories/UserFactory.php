@@ -2,6 +2,7 @@
 
 namespace Database\Factories;
 
+use App\Models\Departamento;
 use App\Models\Team;
 use App\Models\User;
 use Illuminate\Database\Eloquent\Factories\Factory;
@@ -36,7 +37,41 @@ class UserFactory extends Factory
             'remember_token' => Str::random(10),
             'profile_photo_path' => null,
             'current_team_id' => null,
+            'departamento_id' => null,
+            'activo' => true,
         ];
+    }
+
+    /**
+     * Cuenta desactivada.
+     */
+    public function inactivo(): static
+    {
+        return $this->state(fn (array $attributes) => [
+            'activo' => false,
+        ]);
+    }
+
+    /**
+     * Usuario adscrito a un departamento.
+     */
+    public function enDepartamento(Departamento|int|null $departamento = null): static
+    {
+        return $this->state(fn (array $attributes) => [
+            'departamento_id' => $departamento instanceof Departamento
+                ? $departamento->getKey()
+                : ($departamento ?? Departamento::factory()),
+        ]);
+    }
+
+    /**
+     * Asigna uno o varios roles de Spatie (deben existir; ver PermisosHelpDeskSeeder).
+     *
+     * @param  string|array<int, string>  $roles
+     */
+    public function conRol(string|array $roles): static
+    {
+        return $this->afterCreating(fn (User $user) => $user->assignRole($roles));
     }
 
     /**

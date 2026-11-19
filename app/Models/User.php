@@ -38,6 +38,16 @@ class User extends Authenticatable
     ];
 
     /**
+     * Valores por defecto, iguales a los de la migración, para que los
+     * modelos recién creados reflejen el estado real sin recargarlos.
+     *
+     * @var array<string, mixed>
+     */
+    protected $attributes = [
+        'activo' => true,
+    ];
+
+    /**
      * The attributes that should be hidden for serialization.
      *
      * @var array<int, string>

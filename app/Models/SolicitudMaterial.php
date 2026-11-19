@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -9,6 +10,8 @@ use Illuminate\Database\Eloquent\Relations\HasOne;
 
 class SolicitudMaterial extends Model
 {
+    use HasFactory;
+
     protected $table = 'solicitudes_materiales';
 
     protected $fillable = ['partida_id', 'usuario_solicitante_id', 'descripcion', 'cantidad', 'unidad_medida', 'justificacion', 'estado', 'fecha_envio', 'usuario_resolucion_id', 'fecha_resolucion', 'observaciones_direccion', 'partida_generada_id'];
