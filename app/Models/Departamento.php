@@ -4,13 +4,16 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
-use Illuminate\Database\Eloquent\Relations\HasOne;
+use Spatie\Activitylog\LogOptions;
+use Spatie\Activitylog\Traits\LogsActivity;
 
 class Departamento extends Model
 {
     use HasFactory;
+    use LogsActivity;
+
+    public const SIGLAS_PROTEGIDAS = ['RM', 'SG', 'ADQ'];
 
     protected $table = 'cat_departamentos';
 
@@ -21,6 +24,20 @@ class Departamento extends Model
         return [
             'activo' => 'boolean',
         ];
+    }
+
+    public function getActivitylogOptions(): LogOptions
+    {
+        return LogOptions::defaults()
+            ->useLogName('catalogos')
+            ->logOnly(['nombre', 'siglas', 'titular_responsable', 'ubicacion_oficina', 'activo'])
+            ->logOnlyDirty()
+            ->dontSubmitEmptyLogs();
+    }
+
+    public function esProtegido(): bool
+    {
+        return in_array(strtoupper((string) $this->siglas), self::SIGLAS_PROTEGIDAS, true);
     }
 
     public function usuarios(): HasMany { return $this->hasMany(User::class, 'departamento_id'); }
