@@ -20,4 +20,9 @@ class ServicioPolicy
         return $this->permits($user, 'servicios.crear')
             && ($this->generalAccess($user) || $user->hasRole('Recepción/Coordinador'));
     }
+
+    public function adjuntarDocumento(User $user, Servicio $servicio): bool
+    {
+        return $this->create($user) && $this->canReadServicio($user, $servicio);
+    }
 }

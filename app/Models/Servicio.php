@@ -6,11 +6,13 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
-use Illuminate\Database\Eloquent\Relations\HasOne;
+use Spatie\Activitylog\LogOptions;
+use Spatie\Activitylog\Traits\LogsActivity;
 
 class Servicio extends Model
 {
     use HasFactory;
+    use LogsActivity;
 
     protected $table = 'servicios';
 
@@ -23,6 +25,26 @@ class Servicio extends Model
             'fecha_recepcion' => 'datetime',
             'es_via_rapida' => 'boolean',
         ];
+    }
+
+    public function getActivitylogOptions(): LogOptions
+    {
+        return LogOptions::defaults()
+            ->useLogName('expedientes')
+            ->logOnly([
+                'numero_oficio',
+                'fecha_oficio',
+                'fecha_recepcion',
+                'ejercicio',
+                'area_solicitante_id',
+                'nombre_solicitante',
+                'dirigido_a',
+                'asunto',
+                'es_via_rapida',
+                'estado_id',
+            ])
+            ->logOnlyDirty()
+            ->dontSubmitEmptyLogs();
     }
 
     public function areaSolicitante(): BelongsTo { return $this->belongsTo(Area::class, 'area_solicitante_id'); }

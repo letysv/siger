@@ -7,10 +7,13 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
+use Spatie\Activitylog\LogOptions;
+use Spatie\Activitylog\Traits\LogsActivity;
 
 class Partida extends Model
 {
     use HasFactory;
+    use LogsActivity;
 
     protected $table = 'partidas';
 
@@ -25,6 +28,30 @@ class Partida extends Model
             'fecha_conclusion' => 'datetime',
             'fecha_cancelacion' => 'datetime',
         ];
+    }
+
+    public function getActivitylogOptions(): LogOptions
+    {
+        return LogOptions::defaults()
+            ->useLogName('partidas')
+            ->logOnly([
+                'numero_partida',
+                'servicio_folio_id',
+                'tipo_servicio_id',
+                'concepto',
+                'cantidad_solicitada',
+                'cantidad_atendida',
+                'unidad_medida',
+                'departamento_id',
+                'estado_id',
+                'fecha_inicio',
+                'fecha_conclusion',
+                'motivo_cancelacion',
+                'cancelado_por',
+                'fecha_cancelacion',
+            ])
+            ->logOnlyDirty()
+            ->dontSubmitEmptyLogs();
     }
 
     public function servicio(): BelongsTo { return $this->belongsTo(Servicio::class, 'servicio_id'); }
