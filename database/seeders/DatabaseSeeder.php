@@ -27,11 +27,14 @@ class DatabaseSeeder extends Seeder
             ['email' => 'test@example.com'],
             [
                 'name' => 'Johan Morales',
+                'username' => 'jmorales',
                 'password' => bcrypt('password'),
                 'activo' => true,
             ]
         );
 
         $user->syncRoles(['Super usuario', 'Administrador']);
+
+        $this->call(PersonalInicialSeeder::class);
     }
 }

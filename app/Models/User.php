@@ -10,6 +10,8 @@ use Illuminate\Notifications\Notifiable;
 use Laravel\Fortify\TwoFactorAuthenticatable;
 use Laravel\Jetstream\HasProfilePhoto;
 use Laravel\Sanctum\HasApiTokens;
+use Spatie\Activitylog\LogOptions;
+use Spatie\Activitylog\Traits\LogsActivity;
 use Spatie\Permission\Traits\HasRoles;
 
 class User extends Authenticatable
@@ -20,6 +22,7 @@ class User extends Authenticatable
     use HasFactory;
 
     use HasProfilePhoto;
+    use LogsActivity;
     use Notifiable;
     use TwoFactorAuthenticatable;
     use HasRoles;
@@ -31,6 +34,7 @@ class User extends Authenticatable
      */
     protected $fillable = [
         'name',
+        'username',
         'email',
         'password',
         'departamento_id',
@@ -80,6 +84,15 @@ class User extends Authenticatable
             'password' => 'hashed',
             'activo' => 'boolean',
         ];
+    }
+
+    public function getActivitylogOptions(): LogOptions
+    {
+        return LogOptions::defaults()
+            ->useLogName('usuarios')
+            ->logOnly(['name', 'username', 'email', 'departamento_id', 'activo'])
+            ->logOnlyDirty()
+            ->dontSubmitEmptyLogs();
     }
 
     public function departamento(): \Illuminate\Database\Eloquent\Relations\BelongsTo

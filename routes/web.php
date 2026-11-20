@@ -1,11 +1,16 @@
 <?php
 
 use App\Livewire\Catalogos\GestionCatalogos;
+use App\Livewire\Usuarios\GestionUsuarios;
 use App\Models\Area;
+use App\Models\User;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Route;
 
 Route::get('/', function () {
-    return view('welcome');
+    return Auth::check()
+        ? redirect()->route('dashboard')
+        : redirect()->route('login');
 });
 
 Route::middleware([
@@ -20,4 +25,8 @@ Route::middleware([
     Route::get('/catalogos', GestionCatalogos::class)
         ->name('catalogos.index')
         ->can('viewAny', Area::class);
+
+    Route::get('/usuarios', GestionUsuarios::class)
+        ->name('usuarios.index')
+        ->can('viewAny', User::class);
 });
