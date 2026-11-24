@@ -5,10 +5,13 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
-use Illuminate\Database\Eloquent\Relations\HasOne;
+use Spatie\Activitylog\LogOptions;
+use Spatie\Activitylog\Traits\LogsActivity;
 
 class ServicioFolio extends Model
 {
+    use LogsActivity;
+
     protected $table = 'servicio_folios';
 
     protected $fillable = ['servicio_id', 'departamento_id', 'ejercicio', 'mes', 'consecutivo', 'folio', 'fecha_asignacion'];
@@ -18,6 +21,15 @@ class ServicioFolio extends Model
         return [
             'fecha_asignacion' => 'datetime',
         ];
+    }
+
+    public function getActivitylogOptions(): LogOptions
+    {
+        return LogOptions::defaults()
+            ->useLogName('folios')
+            ->logOnly(['servicio_id', 'departamento_id', 'ejercicio', 'mes', 'consecutivo', 'folio', 'fecha_asignacion'])
+            ->logOnlyDirty()
+            ->dontSubmitEmptyLogs();
     }
 
     public function servicio(): BelongsTo { return $this->belongsTo(Servicio::class, 'servicio_id'); }

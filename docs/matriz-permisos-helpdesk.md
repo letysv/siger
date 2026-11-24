@@ -1,3 +1,39 @@
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 # Matriz de permisos de HelpDesk 2.0
 
 Estado: concesiones de la tabla aprobadas por el usuario.
@@ -67,21 +103,17 @@ no se concede al Jefe la creación directa de esa partida.
 - La adscripción se mantiene exclusivamente en `users.departamento_id`, sin pivote
   de departamentos. No se concede acceso general a Coordinación por defecto.
 
-## Aprobación y decisiones de alcance pendientes
+## Aprobación y decisiones de alcance actualizadas (v1.3)
 
-1. Concesiones de la tabla aprobadas, incluidas las facultades operativas de
-   Super usuario y Administrador. Esta aprobación no resuelve las celdas P.
-2. Precisar si los Jefes podrán turnar y re-turnar, y a qué departamentos destino.
-   RF-014 remite a destinos autorizados que RF-001 no enumera.
-3. Precisar el alcance de Recepción sobre expedientes sin departamento y las
-   facultades del rol combinado Recepción/Coordinador. Confirmar si Coordinación
-   queda limitada a su adscripción o necesita excepciones de acceso.
-4. Precisar la consulta del Jefe a partidas ADQ derivadas de sus solicitudes.
+1. Concesiones aprobadas de los 20 permisos base más los 6 permisos de operación de partidas:
+   - `partidas.editar` (solo antes de turnar): `Super usuario` (G), `Administrador` (G), `Recepción/Coordinador` (R vía rápida o recepción central).
+   - `partidas.regresar_direccion`: `Jefe` (D) regresa partidas mal turnadas (`TURNADO`/`EN_ATENCION`) a Dirección en estado `EN_REVISION` con motivo obligatorio para que `Administrador` / `Super usuario` las re-turne (`partidas.returnar` habilitado también desde `EN_REVISION` cuando ya existe `servicio_folio_id`).
+   - `partidas.iniciar_atencion` y `partidas.concluir`: `Super usuario`/`Administrador` (G), `Jefe` (D), `Recepción/Coordinador` (D), `Operativo` (A).
+   - `partidas.devolver` y `partidas.reanudar`: `Super usuario`/`Administrador` (G), `Jefe` (D), `Recepción/Coordinador` (D).
+2. Recepción de Dirección (`Recepción/Coordinador` con `departamento_id = NULL`) puede consultar y adjuntar documentos/acuses en los expedientes que registró o que aún no tienen departamento asignado, manteniendo el turnado ordinario en Administración.
+3. Un Jefe consulta un resumen de seguimiento (número de partida, folio ADQ, estado y conclusión) de la partida ADQ derivada dentro del detalle de su solicitud de materiales, sin abrir acceso general a partidas de ADQ.
 
-Los permisos de usuarios, catálogos, devoluciones, inicio de atención, conclusión,
-evidencias, auditoría y reportes todavía no tienen identificadores en el seeder.
-Se definirán con aprobación en el módulo correspondiente; esta tabla no cubre
-todavía todas las operaciones del sistema ni debe utilizarse como matriz final.
+Los permisos de usuarios, catálogos, auditoría y reportes se mantienen en su alcance administrativo hasta que se definan identificadores propios en sus módulos.
 
 ## Departamentos iniciales
 

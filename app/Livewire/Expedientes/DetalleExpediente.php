@@ -26,6 +26,8 @@ class DetalleExpediente extends Component
 
     public bool $modalPartidaAbierto = false;
 
+    public ?int $partidaEditandoId = null;
+
     public bool $modalAcuseAbierto = false;
 
     public ?int $acuseOriginalId = null;
@@ -62,6 +64,7 @@ class DetalleExpediente extends Component
 
         $this->limpiarMensajes();
         $this->resetValidation();
+        $this->partidaEditandoId = null;
         $this->partidaForm = [
             'tipo_servicio_id' => '',
             'concepto' => '',
@@ -73,9 +76,29 @@ class DetalleExpediente extends Component
         $this->modalPartidaAbierto = true;
     }
 
+    public function abrirEditarPartida(int $partidaId): void
+    {
+        $partida = $this->servicio->partidas()->findOrFail($partidaId);
+        Gate::authorize('update', $partida);
+
+        $this->limpiarMensajes();
+        $this->resetValidation();
+        $this->partidaEditandoId = $partida->id;
+        $this->partidaForm = [
+            'tipo_servicio_id' => $partida->tipo_servicio_id !== null ? (string) $partida->tipo_servicio_id : '',
+            'concepto' => (string) ($partida->concepto ?? ''),
+            'cantidad_solicitada' => $partida->cantidad_solicitada !== null ? (string) $partida->cantidad_solicitada : '',
+            'unidad_medida' => (string) ($partida->unidad_medida ?? ''),
+            'departamento_id' => $partida->departamento_id !== null ? (string) $partida->departamento_id : '',
+            'observaciones' => (string) ($partida->observaciones ?? ''),
+        ];
+        $this->modalPartidaAbierto = true;
+    }
+
     public function cerrarModalPartida(): void
     {
         $this->modalPartidaAbierto = false;
+        $this->partidaEditandoId = null;
         $this->resetValidation();
     }
 
@@ -83,13 +106,23 @@ class DetalleExpediente extends Component
     {
         $this->limpiarMensajes();
         $this->resetValidation();
-        Gate::authorize('create', [Partida::class, $this->servicio]);
 
         /** @var User $usuario */
         $usuario = Auth::user();
+        $editando = $this->partidaEditandoId !== null
+            ? $this->servicio->partidas()->findOrFail($this->partidaEditandoId)
+            : null;
+
+        if ($editando !== null) {
+            Gate::authorize('update', $editando);
+        } else {
+            Gate::authorize('create', [Partida::class, $this->servicio]);
+        }
 
         try {
-            $partida = $expedienteService->agregarPartida($this->servicio, $this->partidaForm, $usuario);
+            $partida = $editando !== null
+                ? $expedienteService->actualizarPartidaPreparacion($editando, $this->partidaForm, $usuario)
+                : $expedienteService->agregarPartida($this->servicio, $this->partidaForm, $usuario);
         } catch (ValidationException $e) {
             foreach ($e->errors() as $campo => $mensajes) {
                 foreach ($mensajes as $mensaje) {
@@ -100,8 +133,9 @@ class DetalleExpediente extends Component
             return;
         }
 
+        $accion = $editando !== null ? 'actualizó' : 'agregó';
         $this->cerrarModalPartida();
-        $this->mensajeExito = "Se agregó la partida #{$partida->numero_partida} al expediente.";
+        $this->mensajeExito = "Se {$accion} la partida #{$partida->numero_partida} del expediente.";
     }
 
     public function subirArchivo(ExpedienteService $expedienteService): void
@@ -227,15 +261,24 @@ class DetalleExpediente extends Component
             ? $tiposServicio->firstWhere('id', (int) $this->partidaForm['tipo_servicio_id'])
             : null;
 
+        $partidasDevueltasCount = $expediente->partidas()
+            ->whereHas('estado', fn ($q) => $q->where('clave', 'DEVUELTO_AREA'))
+            ->count();
+
+        $acusesVigentes = $expediente->acuses->filter(fn (ServicioAcuse $a): bool => $a->sustituto === null)->values();
+        $acusesHistoricos = $expediente->acuses->filter(fn (ServicioAcuse $a): bool => $a->sustituto !== null)->values();
+
         return view('livewire.expedientes.detalle-expediente', [
             'expediente' => $expediente,
             'partidas' => $partidasVisibles,
+            'partidasDevueltasCount' => $partidasDevueltasCount,
+            'acusesVigentes' => $acusesVigentes,
+            'acusesHistoricos' => $acusesHistoricos,
             'tiposServicio' => $tiposServicio,
             'departamentos' => Departamento::where('activo', true)->orderBy('nombre')->get(),
             'requiereCantidad' => $tipoSeleccionado?->requiere_cantidad ?? false,
             'puedeAgregarPartida' => Gate::allows('create', [Partida::class, $expediente]),
             'puedeAdjuntar' => Gate::allows('adjuntarDocumento', $expediente),
-            'puedeVerDocumentos' => Gate::allows('viewAny', Servicio::class) || Auth::user()?->checkPermissionTo('documentos.ver', 'web'),
         ]);
     }
 

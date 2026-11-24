@@ -24,13 +24,15 @@ use Illuminate\Validation\ValidationException;
 use Throwable;
 
 /**
- * Lógica de negocio y consultas acotadas para expedientes y sus documentos (Fase 2).
+ * Lógica de negocio y consultas acotadas para expedientes y sus documentos (RF-007, RF-008, RF-009, RF-012, RF-013).
  */
 class ExpedienteService
 {
     private const DISCO_DOCUMENTOS = 'local';
 
-    private const EXTENSIONES_PERMITIDAS = ['pdf', 'jpg', 'jpeg', 'png', 'doc', 'docx'];
+    public function __construct(
+        private readonly PartidaService $partidaService,
+    ) {}
 
     /**
      * Consulta de expedientes filtrada estrictamente según el alcance de la Policy.
@@ -45,6 +47,13 @@ class ExpedienteService
 
         if ($usuario->hasAnyRole(['Super usuario', 'Administrador'])) {
             return Servicio::query();
+        }
+
+        if ($usuario->departamento_id === null && $usuario->hasRole('Recepción/Coordinador')) {
+            return Servicio::query()->where(function (Builder $query) use ($usuario): void {
+                $query->where('usuario_id', $usuario->id)
+                    ->orWhereHas('partidas', fn (Builder $partidas) => $partidas->whereNull('departamento_id'));
+            });
         }
 
         return Servicio::query()->whereHas('partidas', function (Builder $query) use ($usuario): void {
@@ -66,7 +75,7 @@ class ExpedienteService
     }
 
     /**
-     * Busca posibles duplicados por área solicitante, ejercicio y número de oficio.
+     * Busca posibles duplicados por área solicitante, ejercicio y número de oficio (RF-012).
      *
      * @return Collection<int, Servicio>
      */
@@ -88,14 +97,14 @@ class ExpedienteService
     }
 
     /**
-     * Registra un expediente (servicios), su partida inicial (numero_partida = 1) y adjuntos opcionales.
-     * No genera folio departamental durante la recepción.
+     * Registra un expediente (servicios), su partida inicial (numero_partida = 1) y adjuntos PDF opcionales.
+     * No genera folio departamental durante la recepción (RF-007 / RF-010).
      *
      * @param  array<int, UploadedFile>  $archivos
      */
     public function registrar(array $datos, User $usuario, array $archivos = [], ?UploadedFile $acuse = null): Servicio
     {
-        Gate::authorize('create', Servicio::class);
+        Gate::forUser($usuario)->authorize('create', Servicio::class);
 
         $normalizados = $this->normalizarDatosExpediente($datos);
         $validados = $this->validarDatosExpediente($normalizados, $usuario);
@@ -140,25 +149,12 @@ class ExpedienteService
                 ]);
 
                 foreach ($archivos as $archivo) {
-                    $registroArchivo = $this->guardarArchivoEnDisco($servicio, $archivo, 'servicios');
-                    $rutasGuardadas[] = $registroArchivo['ruta'];
-
-                    ServicioArchivo::create([
-                        'servicio_id' => $servicio->id,
-                        'nombre' => $registroArchivo['nombre'],
-                        'ruta' => $registroArchivo['ruta'],
-                    ]);
+                    $registro = $this->crearArchivoConNomenclatura($servicio, $archivo, $rutasGuardadas);
+                    unset($registro);
                 }
 
                 if ($acuse !== null) {
-                    $registroAcuse = $this->guardarArchivoEnDisco($servicio, $acuse, 'acuses');
-                    $rutasGuardadas[] = $registroAcuse['ruta'];
-
-                    ServicioAcuse::create([
-                        'servicio_id' => $servicio->id,
-                        'nombre' => $registroAcuse['nombre'],
-                        'ruta' => $registroAcuse['ruta'],
-                    ]);
+                    $this->crearAcuseConNomenclatura($servicio, $acuse, null, null, null, $rutasGuardadas);
                 }
 
                 return $servicio->load(['areaSolicitante', 'estado', 'partidas.departamento', 'partidas.tipoServicio', 'archivos', 'acuses']);
@@ -173,12 +169,215 @@ class ExpedienteService
     }
 
     /**
-     * Agrega una partida adicional a un expediente existente con bloqueo pesimista para evitar duplicados de numero_partida.
+     * Agrega una partida adicional a un expediente existente con bloqueo pesimista y recálculo RF-015.
      */
     public function agregarPartida(Servicio $servicio, array $datos, User $usuario): Partida
     {
-        Gate::authorize('create', [Partida::class, $servicio]);
+        Gate::forUser($usuario)->authorize('create', [Partida::class, $servicio]);
 
+        $validados = $this->validarDatosPartida($datos);
+
+        return DB::transaction(function () use ($servicio, $validados): Partida {
+            $expedienteBloqueado = Servicio::whereKey($servicio->getKey())->lockForUpdate()->firstOrFail();
+            $estadoRegistrado = Estado::where('clave', 'REGISTRADO')->firstOrFail();
+            $siguienteNumero = ((int) $expedienteBloqueado->partidas()->max('numero_partida')) + 1;
+
+            $partida = Partida::create([
+                'servicio_id' => $expedienteBloqueado->id,
+                'partida_origen_id' => null,
+                'numero_partida' => $siguienteNumero,
+                'servicio_folio_id' => null,
+                'tipo_servicio_id' => $validados['tipo_servicio_id'],
+                'concepto' => $validados['concepto'],
+                'cantidad_solicitada' => $validados['cantidad_solicitada'],
+                'unidad_medida' => $validados['unidad_medida'],
+                'departamento_id' => $validados['departamento_id'],
+                'observaciones' => $validados['observaciones'],
+                'estado_id' => $estadoRegistrado->id,
+            ]);
+
+            $this->partidaService->recalcularEstadoExpediente($expedienteBloqueado);
+
+            return $partida;
+        });
+    }
+
+    /**
+     * Permite completar o corregir una partida que todavía no ha sido turnada (RF-013 / RF-014).
+     */
+    public function actualizarPartidaPreparacion(Partida $partida, array $datos, User $usuario): Partida
+    {
+        Gate::forUser($usuario)->authorize('update', $partida);
+
+        $validados = $this->validarDatosPartida($datos);
+
+        if (! $usuario->hasAnyRole(['Super usuario', 'Administrador'])
+            && $usuario->hasRole('Recepción/Coordinador')
+            && $usuario->departamento_id !== null
+            && $validados['departamento_id'] !== null
+            && (int) $validados['departamento_id'] !== (int) $usuario->departamento_id) {
+            throw ValidationException::withMessages([
+                'departamento_id' => 'Solo puedes proponer tu departamento de adscripción.',
+            ]);
+        }
+
+        return DB::transaction(function () use ($partida, $validados, $usuario): Partida {
+            $partidaBloqueada = Partida::whereKey($partida->getKey())->lockForUpdate()->firstOrFail();
+            Gate::forUser($usuario)->authorize('update', $partidaBloqueada);
+
+            $partidaBloqueada->update([
+                'tipo_servicio_id' => $validados['tipo_servicio_id'],
+                'concepto' => $validados['concepto'],
+                'cantidad_solicitada' => $validados['cantidad_solicitada'],
+                'unidad_medida' => $validados['unidad_medida'],
+                'departamento_id' => $validados['departamento_id'],
+                'observaciones' => $validados['observaciones'],
+            ]);
+
+            return $partidaBloqueada->fresh(['tipoServicio', 'departamento', 'estado']);
+        });
+    }
+
+    public function adjuntarArchivo(Servicio $servicio, UploadedFile $archivo, User $usuario): ServicioArchivo
+    {
+        Gate::forUser($usuario)->authorize('adjuntarDocumento', $servicio);
+        $this->validarArchivosAdjuntos([$archivo], null);
+
+        $rutasGuardadas = [];
+
+        try {
+            return DB::transaction(fn (): ServicioArchivo => $this->crearArchivoConNomenclatura($servicio, $archivo, $rutasGuardadas));
+        } catch (Throwable $exception) {
+            foreach ($rutasGuardadas as $ruta) {
+                Storage::disk(self::DISCO_DOCUMENTOS)->delete($ruta);
+            }
+
+            throw $exception;
+        }
+    }
+
+    public function registrarAcuse(
+        Servicio $servicio,
+        UploadedFile $archivo,
+        User $usuario,
+        ?ServicioAcuse $acuseOriginal = null,
+        ?string $motivoSustitucion = null,
+    ): ServicioAcuse {
+        Gate::forUser($usuario)->authorize('adjuntarDocumento', $servicio);
+        $this->validarArchivosAdjuntos([], $archivo);
+
+        $motivo = $this->textoOpcional($motivoSustitucion);
+
+        if ($acuseOriginal !== null) {
+            if ((int) $acuseOriginal->servicio_id !== (int) $servicio->id) {
+                throw ValidationException::withMessages([
+                    'acuse_original_id' => 'El acuse seleccionado no pertenece a este expediente.',
+                ]);
+            }
+
+            if ($motivo === null) {
+                throw ValidationException::withMessages([
+                    'motivo_sustitucion' => 'Debes indicar el motivo de sustitución del acuse.',
+                ]);
+            }
+        }
+
+        $rutasGuardadas = [];
+
+        try {
+            return DB::transaction(function () use ($servicio, $archivo, $usuario, $acuseOriginal, $motivo, &$rutasGuardadas): ServicioAcuse {
+                if ($acuseOriginal !== null) {
+                    $originalBloqueado = ServicioAcuse::whereKey($acuseOriginal->getKey())->lockForUpdate()->firstOrFail();
+
+                    if ($originalBloqueado->sustituto()->exists()) {
+                        throw ValidationException::withMessages([
+                            'acuse_original_id' => 'Este acuse ya fue sustituido previamente.',
+                        ]);
+                    }
+                }
+
+                return $this->crearAcuseConNomenclatura(
+                    $servicio,
+                    $archivo,
+                    $acuseOriginal?->id,
+                    $acuseOriginal !== null ? $motivo : null,
+                    $acuseOriginal !== null ? $usuario->id : null,
+                    $rutasGuardadas,
+                );
+            });
+        } catch (Throwable $exception) {
+            foreach ($rutasGuardadas as $ruta) {
+                Storage::disk(self::DISCO_DOCUMENTOS)->delete($ruta);
+            }
+
+            throw $exception;
+        }
+    }
+
+    /**
+     * @param  array<int, string>  $rutasGuardadas
+     */
+    private function crearArchivoConNomenclatura(Servicio $servicio, UploadedFile $archivo, array &$rutasGuardadas): ServicioArchivo
+    {
+        $temporal = 'tmp-'.Str::uuid().'.pdf';
+        $registro = ServicioArchivo::create([
+            'servicio_id' => $servicio->id,
+            'nombre' => $temporal,
+            'ruta' => $temporal,
+        ]);
+
+        // RF-008: SERVICIO_[servicio_id]_[identificador_archivo].pdf en servicios/[servicio_id]/archivos/
+        $nombreFinal = "SERVICIO_{$servicio->id}_{$registro->id}.pdf";
+        $rutaFinal = $archivo->storeAs("servicios/{$servicio->id}/archivos", $nombreFinal, self::DISCO_DOCUMENTOS);
+        $rutasGuardadas[] = $rutaFinal;
+
+        $registro->update([
+            'nombre' => $nombreFinal,
+            'ruta' => $rutaFinal,
+        ]);
+
+        return $registro;
+    }
+
+    /**
+     * @param  array<int, string>  $rutasGuardadas
+     */
+    private function crearAcuseConNomenclatura(
+        Servicio $servicio,
+        UploadedFile $archivo,
+        ?int $acuseOriginalId,
+        ?string $motivoSustitucion,
+        ?int $sustituidoPor,
+        array &$rutasGuardadas,
+    ): ServicioAcuse {
+        $temporal = 'tmp-'.Str::uuid().'.pdf';
+        $registro = ServicioAcuse::create([
+            'servicio_id' => $servicio->id,
+            'nombre' => $temporal,
+            'ruta' => $temporal,
+            'acuse_original_id' => $acuseOriginalId,
+            'motivo_sustitucion' => $motivoSustitucion,
+            'sustituido_por' => $sustituidoPor,
+        ]);
+
+        // RF-009: ACUSE_[servicio_id]_[identificador_acuse].pdf en servicios/[servicio_id]/acuses/
+        $nombreFinal = "ACUSE_{$servicio->id}_{$registro->id}.pdf";
+        $rutaFinal = $archivo->storeAs("servicios/{$servicio->id}/acuses", $nombreFinal, self::DISCO_DOCUMENTOS);
+        $rutasGuardadas[] = $rutaFinal;
+
+        $registro->update([
+            'nombre' => $nombreFinal,
+            'ruta' => $rutaFinal,
+        ]);
+
+        return $registro;
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function validarDatosPartida(array $datos): array
+    {
         $normalizados = [
             'tipo_servicio_id' => $this->enteroOpcional($datos['tipo_servicio_id'] ?? null),
             'concepto' => trim((string) ($datos['concepto'] ?? '')),
@@ -197,98 +396,14 @@ class ExpedienteService
             'observaciones' => ['nullable', 'string', 'max:2000'],
         ])->validate();
 
-        $this->validarTipoServicioYCantidad($validados['tipo_servicio_id'], $validados['cantidad_solicitada']);
+        $this->validarTipoServicioYCantidad(
+            $validados['tipo_servicio_id'],
+            $validados['cantidad_solicitada'],
+            $validados['unidad_medida'],
+        );
         $this->validarDepartamentoActivo($validados['departamento_id']);
 
-        return DB::transaction(function () use ($servicio, $validados): Partida {
-            $expedienteBloqueado = Servicio::whereKey($servicio->getKey())->lockForUpdate()->firstOrFail();
-            $estadoRegistrado = Estado::where('clave', 'REGISTRADO')->firstOrFail();
-            $siguienteNumero = ((int) $expedienteBloqueado->partidas()->max('numero_partida')) + 1;
-
-            return Partida::create([
-                'servicio_id' => $expedienteBloqueado->id,
-                'partida_origen_id' => null,
-                'numero_partida' => $siguienteNumero,
-                'servicio_folio_id' => null,
-                'tipo_servicio_id' => $validados['tipo_servicio_id'],
-                'concepto' => $validados['concepto'],
-                'cantidad_solicitada' => $validados['cantidad_solicitada'],
-                'unidad_medida' => $validados['unidad_medida'],
-                'departamento_id' => $validados['departamento_id'],
-                'observaciones' => $validados['observaciones'],
-                'estado_id' => $estadoRegistrado->id,
-            ]);
-        });
-    }
-
-    public function adjuntarArchivo(Servicio $servicio, UploadedFile $archivo, User $usuario): ServicioArchivo
-    {
-        Gate::authorize('adjuntarDocumento', $servicio);
-        $this->validarArchivosAdjuntos([$archivo], null);
-
-        $guardado = $this->guardarArchivoEnDisco($servicio, $archivo, 'servicios');
-
-        try {
-            return DB::transaction(fn (): ServicioArchivo => ServicioArchivo::create([
-                'servicio_id' => $servicio->id,
-                'nombre' => $guardado['nombre'],
-                'ruta' => $guardado['ruta'],
-            ]));
-        } catch (Throwable $exception) {
-            Storage::disk(self::DISCO_DOCUMENTOS)->delete($guardado['ruta']);
-
-            throw $exception;
-        }
-    }
-
-    public function registrarAcuse(
-        Servicio $servicio,
-        UploadedFile $archivo,
-        User $usuario,
-        ?ServicioAcuse $acuseOriginal = null,
-        ?string $motivoSustitucion = null,
-    ): ServicioAcuse {
-        Gate::authorize('adjuntarDocumento', $servicio);
-        $this->validarArchivosAdjuntos([], $archivo);
-
-        $motivo = $this->textoOpcional($motivoSustitucion);
-
-        if ($acuseOriginal !== null) {
-            if ((int) $acuseOriginal->servicio_id !== (int) $servicio->id) {
-                throw ValidationException::withMessages([
-                    'acuse_original_id' => 'El acuse seleccionado no pertenece a este expediente.',
-                ]);
-            }
-
-            if ($acuseOriginal->sustituto()->exists()) {
-                throw ValidationException::withMessages([
-                    'acuse_original_id' => 'Este acuse ya fue sustituido previamente.',
-                ]);
-            }
-
-            if ($motivo === null) {
-                throw ValidationException::withMessages([
-                    'motivo_sustitucion' => 'Debes indicar el motivo de sustitución del acuse.',
-                ]);
-            }
-        }
-
-        $guardado = $this->guardarArchivoEnDisco($servicio, $archivo, 'acuses');
-
-        try {
-            return DB::transaction(fn (): ServicioAcuse => ServicioAcuse::create([
-                'servicio_id' => $servicio->id,
-                'nombre' => $guardado['nombre'],
-                'ruta' => $guardado['ruta'],
-                'acuse_original_id' => $acuseOriginal?->id,
-                'motivo_sustitucion' => $acuseOriginal !== null ? $motivo : null,
-                'sustituido_por' => $acuseOriginal !== null ? $usuario->id : null,
-            ]));
-        } catch (Throwable $exception) {
-            Storage::disk(self::DISCO_DOCUMENTOS)->delete($guardado['ruta']);
-
-            throw $exception;
-        }
+        return $validados;
     }
 
     /**
@@ -345,7 +460,11 @@ class ExpedienteService
             ]);
         }
 
-        $this->validarTipoServicioYCantidad($validados['tipo_servicio_id'], $validados['cantidad_solicitada']);
+        $this->validarTipoServicioYCantidad(
+            $validados['tipo_servicio_id'],
+            $validados['cantidad_solicitada'],
+            $validados['unidad_medida'],
+        );
         $this->validarDepartamentoActivo($validados['departamento_id']);
 
         if ($validados['es_via_rapida']) {
@@ -371,7 +490,7 @@ class ExpedienteService
         return $validados;
     }
 
-    private function validarTipoServicioYCantidad(?int $tipoServicioId, mixed $cantidadSolicitada): void
+    private function validarTipoServicioYCantidad(?int $tipoServicioId, mixed $cantidadSolicitada, ?string $unidadMedida): void
     {
         if ($tipoServicioId === null) {
             return;
@@ -384,10 +503,18 @@ class ExpedienteService
             ]);
         }
 
-        if ($tipo->requiere_cantidad && ($cantidadSolicitada === null || (float) $cantidadSolicitada <= 0)) {
-            throw ValidationException::withMessages([
-                'cantidad_solicitada' => 'Este tipo de servicio requiere capturar una cantidad solicitada mayor a cero.',
-            ]);
+        if ($tipo->requiere_cantidad) {
+            if ($cantidadSolicitada === null || (float) $cantidadSolicitada <= 0) {
+                throw ValidationException::withMessages([
+                    'cantidad_solicitada' => 'Este tipo de servicio requiere capturar una cantidad solicitada mayor a cero.',
+                ]);
+            }
+
+            if ($unidadMedida === null || trim($unidadMedida) === '') {
+                throw ValidationException::withMessages([
+                    'unidad_medida' => 'Este tipo de servicio requiere capturar la unidad de medida.',
+                ]);
+            }
         }
     }
 
@@ -406,44 +533,28 @@ class ExpedienteService
     }
 
     /**
+     * RF-008 y RF-009: los archivos del oficio y acuses de recepción deben ser únicamente PDF de hasta 10 MB.
+     *
      * @param  array<int, UploadedFile>  $archivos
      */
     private function validarArchivosAdjuntos(array $archivos, ?UploadedFile $acuse): void
     {
-        $mimes = implode(',', self::EXTENSIONES_PERMITIDAS);
-
         Validator::make(
             ['archivos' => $archivos, 'acuse' => $acuse],
             [
                 'archivos' => ['array', 'max:10'],
-                'archivos.*' => ['file', "mimes:{$mimes}", 'max:10240'],
-                'acuse' => ['nullable', 'file', "mimes:{$mimes}", 'max:10240'],
+                'archivos.*' => ['file', 'mimes:pdf', 'mimetypes:application/pdf', 'max:10240'],
+                'acuse' => ['nullable', 'file', 'mimes:pdf', 'mimetypes:application/pdf', 'max:10240'],
             ],
             [
-                'archivos.*.mimes' => 'Los archivos adjuntos deben ser PDF, imagen (JPG/PNG) o Word (DOC/DOCX).',
+                'archivos.*.mimes' => 'Los archivos del oficio deben ser únicamente en formato PDF.',
+                'archivos.*.mimetypes' => 'Los archivos del oficio deben ser únicamente en formato PDF válido.',
                 'archivos.*.max' => 'Cada archivo adjunto no debe superar los 10 MB.',
-                'acuse.mimes' => 'El acuse debe ser PDF, imagen (JPG/PNG) o Word (DOC/DOCX).',
+                'acuse.mimes' => 'El acuse de recepción debe ser únicamente en formato PDF.',
+                'acuse.mimetypes' => 'El acuse de recepción debe ser únicamente en formato PDF válido.',
                 'acuse.max' => 'El acuse no debe superar los 10 MB.',
             ]
         )->validate();
-    }
-
-    /**
-     * @return array{nombre: string, ruta: string}
-     */
-    private function guardarArchivoEnDisco(Servicio $servicio, UploadedFile $archivo, string $carpetaBase): array
-    {
-        $extension = strtolower($archivo->getClientOriginalExtension() ?: $archivo->extension() ?: 'bin');
-        $nombreOriginal = pathinfo($archivo->getClientOriginalName(), PATHINFO_FILENAME);
-        $slug = Str::slug($nombreOriginal) ?: 'documento';
-        $nombreUnico = Str::limit($slug, 80, '').'-'.Str::uuid().'.'.$extension;
-        $directorio = "{$carpetaBase}/{$servicio->ejercicio}/{$servicio->id}";
-        $ruta = $archivo->storeAs($directorio, $nombreUnico, self::DISCO_DOCUMENTOS);
-
-        return [
-            'nombre' => $nombreUnico,
-            'ruta' => $ruta,
-        ];
     }
 
     private function textoOpcional(mixed $valor): ?string

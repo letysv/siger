@@ -42,6 +42,12 @@
         </div>
     @endif
 
+    @if ($partidasDevueltasCount > 0)
+        <div class="rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900 font-medium">
+            Advertencia: este expediente tiene {{ $partidasDevueltasCount }} {{ $partidasDevueltasCount === 1 ? 'partida' : 'partidas' }} en estado Devuelto al área pendientes de aclaración.
+        </div>
+    @endif
+
     {{-- Encabezado del expediente --}}
     <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-6 space-y-5">
         <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4 border-b border-slate-100 pb-4">
@@ -136,6 +142,7 @@
                         <th class="px-6 py-3">Folio</th>
                         <th class="px-6 py-3">Cantidad</th>
                         <th class="px-6 py-3">Estado</th>
+                        <th class="px-6 py-3 text-right">Acciones</th>
                     </tr>
                 </thead>
                 <tbody class="divide-y divide-slate-100 bg-white">
@@ -171,10 +178,19 @@
                                     {{ $partida->estado?->nombre }}
                                 </span>
                             </td>
+                            <td class="px-6 py-3.5 text-right whitespace-nowrap">
+                                @can('update', $partida)
+                                    <button type="button" wire:click="abrirEditarPartida({{ $partida->id }})" class="text-xs font-semibold text-siger-700 hover:text-siger-900">
+                                        Editar
+                                    </button>
+                                @else
+                                    <span class="text-xs text-slate-300">—</span>
+                                @endcan
+                            </td>
                         </tr>
                     @empty
                         <tr>
-                            <td colspan="6" class="px-6 py-6 text-center text-slate-500">
+                            <td colspan="7" class="px-6 py-6 text-center text-slate-500">
                                 No hay partidas visibles para tu alcance actual.
                             </td>
                         </tr>
@@ -192,10 +208,10 @@
 
             @if ($puedeAdjuntar)
                 <form wire:submit="subirArchivo" class="flex flex-col sm:flex-row gap-2 items-start sm:items-center border-b border-slate-100 pb-4">
-                    <input type="file" wire:model="nuevoArchivo"
+                    <input type="file" accept="application/pdf,.pdf" wire:model="nuevoArchivo"
                            class="block w-full text-xs text-slate-600 file:me-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-siger-50 file:text-siger-700" />
                     <x-button type="submit" wire:loading.attr="disabled" class="shrink-0">
-                        Adjuntar
+                        Adjuntar PDF
                     </x-button>
                 </form>
                 <x-input-error for="nuevoArchivo" class="mt-1" />
@@ -235,15 +251,13 @@
             </div>
 
             <ul class="divide-y divide-slate-100 text-sm">
-                @forelse ($expediente->acuses as $acuse)
+                @forelse ($acusesVigentes as $acuse)
                     <li class="py-3 space-y-1">
                         <div class="flex items-center justify-between gap-3">
                             <div class="min-w-0">
                                 <div class="font-medium text-slate-800 truncate">
                                     {{ $acuse->nombre }}
-                                    @if ($acuse->sustituto !== null)
-                                        <span class="ms-1 text-[10px] font-semibold uppercase px-1.5 py-0.5 rounded bg-slate-100 text-slate-500">Sustituido</span>
-                                    @endif
+                                    <span class="ms-1 text-[10px] font-semibold uppercase px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700">Vigente</span>
                                 </div>
                                 <div class="text-[11px] text-slate-400">{{ $acuse->created_at?->format('d/m/Y H:i') }}</div>
                             </div>
@@ -254,7 +268,7 @@
                                 @can('download', $acuse)
                                     <a href="{{ route('expedientes.acuses.descargar', $acuse) }}" class="text-xs font-semibold text-emerald-700 hover:text-emerald-900">Descargar</a>
                                 @endcan
-                                @if ($puedeAdjuntar && $acuse->sustituto === null)
+                                @if ($puedeAdjuntar)
                                     <button type="button" wire:click="abrirModalAcuse({{ $acuse->id }})" class="text-xs font-semibold text-amber-700 hover:text-amber-900">
                                         Sustituir
                                     </button>
@@ -269,15 +283,40 @@
                         @endif
                     </li>
                 @empty
-                    <li class="py-4 text-xs text-slate-400">No hay acuses registrados.</li>
+                    <li class="py-4 text-xs text-slate-400">No hay acuses vigentes registrados.</li>
                 @endforelse
             </ul>
+
+            @if ($acusesHistoricos->isNotEmpty())
+                <details class="pt-3 border-t border-slate-100 text-xs">
+                    <summary class="cursor-pointer font-semibold text-slate-500 hover:text-slate-700">
+                        Historial de acuses sustituidos ({{ $acusesHistoricos->count() }})
+                    </summary>
+                    <ul class="mt-2 divide-y divide-slate-100">
+                        @foreach ($acusesHistoricos as $acuseHist)
+                            <li class="py-2 flex items-center justify-between gap-2 text-slate-500">
+                                <span class="truncate">{{ $acuseHist->nombre }} · {{ $acuseHist->created_at?->format('d/m/Y H:i') }}</span>
+                                <span class="flex items-center gap-2 shrink-0">
+                                    @can('view', $acuseHist)
+                                        <a href="{{ route('expedientes.acuses.ver', $acuseHist) }}" target="_blank" class="font-semibold text-siger-700 hover:text-siger-900">Ver</a>
+                                    @endcan
+                                    @can('download', $acuseHist)
+                                        <a href="{{ route('expedientes.acuses.descargar', $acuseHist) }}" class="font-semibold text-emerald-700 hover:text-emerald-900">Descargar</a>
+                                    @endcan
+                                </span>
+                            </li>
+                        @endforeach
+                    </ul>
+                </details>
+            @endif
         </div>
     </div>
 
-    {{-- Modal agregar partida --}}
+    {{-- Modal agregar / editar partida --}}
     <x-dialog-modal wire:model.live="modalPartidaAbierto">
-        <x-slot name="title">Agregar partida al expediente #{{ $expediente->id }}</x-slot>
+        <x-slot name="title">
+            {{ $partidaEditandoId !== null ? 'Editar partida en preparación' : 'Agregar partida al expediente #'.$expediente->id }}
+        </x-slot>
 
         <x-slot name="content">
             <form wire:submit="guardarPartida" id="form-nueva-partida" class="space-y-4">
@@ -319,7 +358,7 @@
                     </div>
 
                     <div>
-                        <x-label for="p_unidad" value="Unidad de medida" />
+                        <x-label for="p_unidad" :value="$requiereCantidad ? 'Unidad de medida *' : 'Unidad de medida'" />
                         <x-input id="p_unidad" type="text" class="mt-1 block w-full" wire:model="partidaForm.unidad_medida" maxlength="100" />
                         <x-input-error for="partidaForm.unidad_medida" class="mt-1" />
                     </div>
@@ -348,8 +387,8 @@
         <x-slot name="content">
             <form wire:submit="guardarAcuse" id="form-acuse-expediente" class="space-y-4">
                 <div>
-                    <x-label for="nuevo_acuse_file" value="Archivo del acuse *" />
-                    <input id="nuevo_acuse_file" type="file" wire:model="nuevoAcuse"
+                    <x-label for="nuevo_acuse_file" value="Archivo del acuse (solo PDF, máx. 10 MB) *" />
+                    <input id="nuevo_acuse_file" type="file" accept="application/pdf,.pdf" wire:model="nuevoAcuse"
                            class="mt-1 block w-full text-sm text-slate-600 file:me-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-siger-50 file:text-siger-700" />
                     <x-input-error for="nuevoAcuse" class="mt-1" />
                 </div>

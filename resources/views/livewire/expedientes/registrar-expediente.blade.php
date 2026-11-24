@@ -162,7 +162,7 @@
             </div>
 
             <div>
-                <x-label for="unidad_medida" value="Unidad de medida" />
+                <x-label for="unidad_medida" :value="$requiereCantidad ? 'Unidad de medida *' : 'Unidad de medida'" />
                 <x-input id="unidad_medida" type="text" class="mt-1 block w-full" wire:model="form.unidad_medida" maxlength="100" placeholder="Ej. Pieza, Servicio, Caja..." />
                 <x-input-error for="form.unidad_medida" class="mt-1" />
             </div>
@@ -185,16 +185,16 @@
 
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-6">
             <div>
-                <x-label for="archivos" value="Digitalizado del oficio / anexos (PDF, JPG, PNG, DOC/DOCX, máx. 10 MB c/u)" />
-                <input id="archivos" type="file" multiple wire:model="archivos"
+                <x-label for="archivos" value="Digitalizado del oficio / anexos (solo PDF, máx. 10 MB c/u)" />
+                <input id="archivos" type="file" accept="application/pdf,.pdf" multiple wire:model="archivos"
                        class="mt-2 block w-full text-sm text-slate-600 file:me-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-siger-50 file:text-siger-700 hover:file:bg-siger-100" />
                 <x-input-error for="archivos" class="mt-1" />
                 <x-input-error for="archivos.*" class="mt-1" />
             </div>
 
             <div>
-                <x-label for="acuse" value="Acuse de recibo inicial (PDF, JPG, PNG, DOC/DOCX, máx. 10 MB)" />
-                <input id="acuse" type="file" wire:model="acuse"
+                <x-label for="acuse" value="Acuse de recibo inicial (solo PDF, máx. 10 MB)" />
+                <input id="acuse" type="file" accept="application/pdf,.pdf" wire:model="acuse"
                        class="mt-2 block w-full text-sm text-slate-600 file:me-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-siger-50 file:text-siger-700 hover:file:bg-siger-100" />
                 <x-input-error for="acuse" class="mt-1" />
             </div>

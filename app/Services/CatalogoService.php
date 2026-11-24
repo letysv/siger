@@ -93,6 +93,12 @@ class CatalogoService
             }
         }
 
+        if ($departamento !== null && $departamento->activo && ! $validados['activo'] && $departamento->usuarios()->exists()) {
+            throw ValidationException::withMessages([
+                'activo' => 'No se puede desactivar el departamento porque tiene usuarios relacionados. Reasigna primero sus cuentas.',
+            ]);
+        }
+
         return DB::transaction(function () use ($departamento, $validados): Departamento {
             $registro = $departamento ?? new Departamento;
             $registro->fill($validados);
@@ -193,10 +199,18 @@ class CatalogoService
 
     public function alternarEstado(Area|Departamento|TipoServicio|Operativo $registro): Area|Departamento|TipoServicio|Operativo
     {
-        if ($registro instanceof Departamento && $registro->esProtegido() && $registro->activo) {
-            throw ValidationException::withMessages([
-                'estado' => 'Los departamentos institucionales base (RM, SG, ADQ) no pueden desactivarse.',
-            ]);
+        if ($registro instanceof Departamento && $registro->activo) {
+            if ($registro->esProtegido()) {
+                throw ValidationException::withMessages([
+                    'estado' => 'Los departamentos institucionales base (RM, SG, ADQ) no pueden desactivarse.',
+                ]);
+            }
+
+            if ($registro->usuarios()->exists()) {
+                throw ValidationException::withMessages([
+                    'estado' => 'No se puede desactivar el departamento porque tiene usuarios relacionados. Reasigna primero sus cuentas.',
+                ]);
+            }
         }
 
         return DB::transaction(function () use ($registro): Area|Departamento|TipoServicio|Operativo {

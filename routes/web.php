@@ -5,6 +5,7 @@ use App\Livewire\Catalogos\GestionCatalogos;
 use App\Livewire\Expedientes\DetalleExpediente;
 use App\Livewire\Expedientes\ListadoExpedientes;
 use App\Livewire\Expedientes\RegistrarExpediente;
+use App\Livewire\Partidas\ListadoPartidas;
 use App\Livewire\Usuarios\GestionUsuarios;
 use App\Models\Area;
 use App\Models\Servicio;
@@ -58,4 +59,8 @@ Route::middleware([
 
     Route::get('/expedientes/acuses/{acuse}/descargar', [DocumentoExpedienteController::class, 'descargarAcuse'])
         ->name('expedientes.acuses.descargar');
+
+    Route::get('/partidas', ListadoPartidas::class)
+        ->name('partidas.index')
+        ->middleware('can:partidas.ver');
 });
