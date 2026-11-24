@@ -63,4 +63,18 @@ Route::middleware([
     Route::get('/partidas', ListadoPartidas::class)
         ->name('partidas.index')
         ->middleware('can:partidas.ver');
+
+    Route::get('/partidas/conclusiones/{registro}/conformidad/ver', [DocumentoExpedienteController::class, 'verConformidad'])
+        ->name('partidas.conformidad.ver');
+
+    Route::get('/partidas/conclusiones/{registro}/conformidad/descargar', [DocumentoExpedienteController::class, 'descargarConformidad'])
+        ->name('partidas.conformidad.descargar');
+
+    Route::get('/partidas/conclusiones/{registro}/evidencias/{indice}/ver', [DocumentoExpedienteController::class, 'verEvidencia'])
+        ->whereNumber('indice')
+        ->name('partidas.evidencias.ver');
+
+    Route::get('/partidas/conclusiones/{registro}/evidencias/{indice}/descargar', [DocumentoExpedienteController::class, 'descargarEvidencia'])
+        ->whereNumber('indice')
+        ->name('partidas.evidencias.descargar');
 });

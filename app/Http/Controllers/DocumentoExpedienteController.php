@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\RegistroOperativo;
 use App\Models\ServicioAcuse;
 use App\Models\ServicioArchivo;
 use Illuminate\Database\Eloquent\Model;
@@ -38,6 +39,84 @@ class DocumentoExpedienteController extends Controller
         Gate::authorize('download', $acuse);
 
         return $this->responderArchivo($acuse, $acuse->ruta, $acuse->nombre, true, 'Acuse descargado');
+    }
+
+    public function verConformidad(RegistroOperativo $registro): StreamedResponse
+    {
+        $this->autorizarDocumentoPartida($registro, 'documentos.ver');
+        abort_if(empty($registro->archivo_conformidad), 404);
+
+        return $this->responderArchivo(
+            $registro,
+            $registro->archivo_conformidad,
+            basename($registro->archivo_conformidad),
+            false,
+            'Conformidad consultada'
+        );
+    }
+
+    public function descargarConformidad(RegistroOperativo $registro): StreamedResponse
+    {
+        $this->autorizarDocumentoPartida($registro, 'documentos.descargar');
+        abort_if(empty($registro->archivo_conformidad), 404);
+
+        return $this->responderArchivo(
+            $registro,
+            $registro->archivo_conformidad,
+            basename($registro->archivo_conformidad),
+            true,
+            'Conformidad descargada'
+        );
+    }
+
+    public function verEvidencia(RegistroOperativo $registro, int $indice): StreamedResponse
+    {
+        $this->autorizarDocumentoPartida($registro, 'documentos.ver');
+        $evidencia = $this->obtenerEvidencia($registro, $indice);
+
+        return $this->responderArchivo(
+            $registro,
+            $evidencia['ruta'],
+            $evidencia['nombre_original'] ?? basename($evidencia['ruta']),
+            false,
+            'Evidencia consultada'
+        );
+    }
+
+    public function descargarEvidencia(RegistroOperativo $registro, int $indice): StreamedResponse
+    {
+        $this->autorizarDocumentoPartida($registro, 'documentos.descargar');
+        $evidencia = $this->obtenerEvidencia($registro, $indice);
+
+        return $this->responderArchivo(
+            $registro,
+            $evidencia['ruta'],
+            $evidencia['nombre_original'] ?? basename($evidencia['ruta']),
+            true,
+            'Evidencia descargada'
+        );
+    }
+
+    private function autorizarDocumentoPartida(RegistroOperativo $registro, string $permiso): void
+    {
+        $usuario = Auth::user();
+        abort_unless(
+            $usuario !== null && $usuario->activo && $usuario->checkPermissionTo($permiso, 'web'),
+            403
+        );
+        abort_if($registro->partida === null, 404);
+        Gate::authorize('view', $registro->partida);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function obtenerEvidencia(RegistroOperativo $registro, int $indice): array
+    {
+        $lista = is_array($registro->evidencias) ? array_values($registro->evidencias) : [];
+        abort_unless(isset($lista[$indice]) && is_array($lista[$indice]) && ! empty($lista[$indice]['ruta']), 404);
+
+        return $lista[$indice];
     }
 
     private function responderArchivo(Model $documento, string $ruta, string $nombre, bool $descarga, string $evento): StreamedResponse
