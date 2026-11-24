@@ -718,6 +718,48 @@
                                 </div>
                             @endif
 
+                            @if (Auth::user()?->checkPermissionTo('solicitudes_materiales.ver', 'web'))
+                                @php
+                                    $solicitudesVisibles = $partidaModal->solicitudesMateriales
+                                        ->filter(fn ($sol) => \Illuminate\Support\Facades\Gate::allows('view', $sol))
+                                        ->sortByDesc('id');
+                                @endphp
+                                @if ($solicitudesVisibles->isNotEmpty() || \Illuminate\Support\Facades\Gate::allows('create', [\App\Models\SolicitudMaterial::class, $partidaModal]))
+                                    <div>
+                                        <div class="flex items-center justify-between mb-2">
+                                            <h4 class="text-xs font-bold uppercase tracking-wider text-slate-500">Solicitudes de materiales</h4>
+                                            <a href="{{ route('solicitudes-materiales.index', \Illuminate\Support\Facades\Gate::allows('create', [\App\Models\SolicitudMaterial::class, $partidaModal]) ? ['partida' => $partidaModal->id] : []) }}"
+                                               class="text-xs font-semibold text-siger-700 hover:text-siger-900">
+                                                {{ \Illuminate\Support\Facades\Gate::allows('create', [\App\Models\SolicitudMaterial::class, $partidaModal]) ? '+ Solicitar materiales →' : 'Ver módulo de materiales →' }}
+                                            </a>
+                                        </div>
+
+                                        @if ($solicitudesVisibles->isNotEmpty())
+                                            <div class="space-y-2">
+                                                @foreach ($solicitudesVisibles as $sol)
+                                                    <div class="border border-slate-200 rounded-lg p-3 text-xs space-y-1">
+                                                        <div class="flex items-center justify-between gap-2">
+                                                            <span class="font-semibold text-slate-800">
+                                                                Solicitud #{{ $sol->id }} · {{ $sol->estado }}
+                                                            </span>
+                                                            <span class="text-slate-400">{{ $sol->created_at?->format('d/m/Y H:i') }}</span>
+                                                        </div>
+                                                        <div class="text-slate-700">{{ $sol->descripcion }}</div>
+                                                        @if ($sol->partidaGenerada)
+                                                            <div class="text-emerald-800">
+                                                                Partida ADQ #{{ $sol->partidaGenerada->numero_partida }} ·
+                                                                <span class="font-mono">{{ $sol->partidaGenerada->folio?->folio ?? 'Pendiente de turnar' }}</span> ·
+                                                                {{ $sol->partidaGenerada->estado?->nombre }}
+                                                            </div>
+                                                        @endif
+                                                    </div>
+                                                @endforeach
+                                            </div>
+                                        @endif
+                                    </div>
+                                @endif
+                            @endif
+
                             <div>
                                 <div class="flex items-center justify-between mb-2">
                                     <h4 class="text-xs font-bold uppercase tracking-wider text-slate-500">Historial de turnados</h4>

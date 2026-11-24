@@ -6,11 +6,13 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
-use Illuminate\Database\Eloquent\Relations\HasOne;
+use Spatie\Activitylog\LogOptions;
+use Spatie\Activitylog\Traits\LogsActivity;
 
 class SolicitudMaterial extends Model
 {
     use HasFactory;
+    use LogsActivity;
 
     protected $table = 'solicitudes_materiales';
 
@@ -23,6 +25,28 @@ class SolicitudMaterial extends Model
             'fecha_envio' => 'datetime',
             'fecha_resolucion' => 'datetime',
         ];
+    }
+
+    public function getActivitylogOptions(): LogOptions
+    {
+        return LogOptions::defaults()
+            ->useLogName('solicitudes_materiales')
+            ->logOnly([
+                'partida_id',
+                'usuario_solicitante_id',
+                'descripcion',
+                'cantidad',
+                'unidad_medida',
+                'justificacion',
+                'estado',
+                'fecha_envio',
+                'usuario_resolucion_id',
+                'fecha_resolucion',
+                'observaciones_direccion',
+                'partida_generada_id',
+            ])
+            ->logOnlyDirty()
+            ->dontSubmitEmptyLogs();
     }
 
     public function partidaOriginal(): BelongsTo { return $this->belongsTo(Partida::class, 'partida_id'); }

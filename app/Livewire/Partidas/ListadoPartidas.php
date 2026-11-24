@@ -649,6 +649,9 @@ class ListadoPartidas extends Component
                 'devoluciones.usuarioReanudacion',
                 'devoluciones.usuarioCierre',
                 'registroConclusion.usuario',
+                'solicitudesMateriales.solicitante',
+                'solicitudesMateriales.partidaGenerada.estado',
+                'solicitudesMateriales.partidaGenerada.folio',
             ])->find($this->partidaSeleccionadaId)
             : null;
 
