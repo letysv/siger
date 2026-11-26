@@ -4,11 +4,13 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
-use Illuminate\Database\Eloquent\Relations\HasMany;
-use Illuminate\Database\Eloquent\Relations\HasOne;
+use Spatie\Activitylog\LogOptions;
+use Spatie\Activitylog\Traits\LogsActivity;
 
 class HistorialDevolucion extends Model
 {
+    use LogsActivity;
+
     protected $table = 'historial_devoluciones';
 
     protected $fillable = ['partida_id', 'usuario_id', 'estado_anterior_id', 'observaciones', 'fecha_devolucion', 'respuesta_subsanacion', 'reanudado_por', 'fecha_reanudacion', 'resultado_cierre', 'cerrado_por', 'fecha_cierre'];
@@ -20,6 +22,27 @@ class HistorialDevolucion extends Model
             'fecha_reanudacion' => 'datetime',
             'fecha_cierre' => 'datetime',
         ];
+    }
+
+    public function getActivitylogOptions(): LogOptions
+    {
+        return LogOptions::defaults()
+            ->useLogName('devoluciones')
+            ->logOnly([
+                'partida_id',
+                'usuario_id',
+                'estado_anterior_id',
+                'observaciones',
+                'fecha_devolucion',
+                'respuesta_subsanacion',
+                'reanudado_por',
+                'fecha_reanudacion',
+                'resultado_cierre',
+                'cerrado_por',
+                'fecha_cierre',
+            ])
+            ->logOnlyDirty()
+            ->dontSubmitEmptyLogs();
     }
 
     public function partida(): BelongsTo { return $this->belongsTo(Partida::class, 'partida_id'); }

@@ -40,6 +40,7 @@ class Servicio extends Model
                 'nombre_solicitante',
                 'dirigido_a',
                 'asunto',
+                'descripcion',
                 'es_via_rapida',
                 'estado_id',
             ])

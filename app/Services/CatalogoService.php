@@ -188,6 +188,13 @@ class CatalogoService
             }
         }
 
+        if ($operativo !== null && $operativo->activo && ! $validados['activo']
+            && $operativo->asignaciones()->where('activo', true)->exists()) {
+            throw ValidationException::withMessages([
+                'activo' => 'No se puede desactivar el operativo porque mantiene asignaciones activas en partidas en curso. Finaliza o sustituye primero sus asignaciones.',
+            ]);
+        }
+
         return DB::transaction(function () use ($operativo, $validados): Operativo {
             $registro = $operativo ?? new Operativo;
             $registro->fill($validados);
@@ -211,6 +218,13 @@ class CatalogoService
                     'estado' => 'No se puede desactivar el departamento porque tiene usuarios relacionados. Reasigna primero sus cuentas.',
                 ]);
             }
+        }
+
+        if ($registro instanceof Operativo && $registro->activo
+            && $registro->asignaciones()->where('activo', true)->exists()) {
+            throw ValidationException::withMessages([
+                'estado' => 'No se puede desactivar el operativo porque mantiene asignaciones activas en partidas en curso. Finaliza o sustituye primero sus asignaciones.',
+            ]);
         }
 
         return DB::transaction(function () use ($registro): Area|Departamento|TipoServicio|Operativo {

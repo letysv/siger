@@ -1,13 +1,29 @@
 <x-form-section submit="updateProfileInformation">
     <x-slot name="title">
-        {{ __('Profile Information') }}
+        Información de la cuenta
     </x-slot>
 
     <x-slot name="description">
-        {{ __('Update your account\'s profile information and email address.') }}
+        Consulta tu usuario institucional, rol y departamento asignado, o actualiza tu nombre y correo opcional.
     </x-slot>
 
     <x-slot name="form">
+        <div class="col-span-6 sm:col-span-4 rounded-lg bg-slate-50 border border-slate-200 p-4 grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+            <div>
+                <div class="font-semibold uppercase text-slate-400">Usuario</div>
+                <div class="mt-0.5 font-mono font-bold text-slate-800">{{ $this->user->username ?? '—' }}</div>
+            </div>
+            <div>
+                <div class="font-semibold uppercase text-slate-400">Rol(es)</div>
+                <div class="mt-0.5 font-semibold text-siger-800">{{ $this->user->getRoleNames()->implode(', ') ?: 'Sin rol' }}</div>
+            </div>
+            <div>
+                <div class="font-semibold uppercase text-slate-400">Adscripción</div>
+                <div class="mt-0.5 text-slate-700">
+                    {{ $this->user->departamento ? $this->user->departamento->siglas.' — '.$this->user->departamento->nombre : 'Dirección / Alcance general' }}
+                </div>
+            </div>
+        </div>
         <!-- Profile Photo -->
         @if (Laravel\Jetstream\Jetstream::managesProfilePhotos())
             <div x-data="{photoName: null, photoPreview: null}" class="col-span-6 sm:col-span-4">
@@ -54,15 +70,15 @@
 
         <!-- Name -->
         <div class="col-span-6 sm:col-span-4">
-            <x-label for="name" value="{{ __('Name') }}" />
+            <x-label for="name" value="Nombre completo *" />
             <x-input id="name" type="text" class="mt-1 block w-full" wire:model="state.name" required autocomplete="name" />
             <x-input-error for="name" class="mt-2" />
         </div>
 
         <!-- Email -->
         <div class="col-span-6 sm:col-span-4">
-            <x-label for="email" value="{{ __('Email') }}" />
-            <x-input id="email" type="email" class="mt-1 block w-full" wire:model="state.email" autocomplete="username" />
+            <x-label for="email" value="Correo electrónico (opcional)" />
+            <x-input id="email" type="email" class="mt-1 block w-full" wire:model="state.email" autocomplete="email" />
             <x-input-error for="email" class="mt-2" />
 
             @if (Laravel\Fortify\Features::enabled(Laravel\Fortify\Features::emailVerification()) && ! $this->user->hasVerifiedEmail())
@@ -85,11 +101,11 @@
 
     <x-slot name="actions">
         <x-action-message class="me-3" on="saved">
-            {{ __('Saved.') }}
+            Guardado.
         </x-action-message>
 
         <x-button wire:loading.attr="disabled" wire:target="photo">
-            {{ __('Save') }}
+            Guardar cambios
         </x-button>
     </x-slot>
 </x-form-section>

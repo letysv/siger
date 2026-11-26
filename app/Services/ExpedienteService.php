@@ -61,7 +61,17 @@ class ExpedienteService
 
             if ($usuario->departamento_id !== null
                 && $usuario->hasAnyRole(['Jefe', 'Recepción/Coordinador'])) {
-                $query->orWhere('departamento_id', $usuario->departamento_id);
+                $query->orWhere(function (Builder $deptQuery) use ($usuario): void {
+                    $deptQuery->where('departamento_id', $usuario->departamento_id)
+                        ->where(function (Builder $visibilidad) use ($usuario): void {
+                            $visibilidad->whereNotNull('servicio_folio_id')
+                                ->orWhereHas('estado', fn (Builder $e) => $e->where('clave', '!=', 'REGISTRADO'));
+
+                            if ($usuario->hasRole('Recepción/Coordinador')) {
+                                $visibilidad->orWhereHas('servicio', fn (Builder $s) => $s->where('es_via_rapida', true));
+                            }
+                        });
+                });
             }
 
             if ($usuario->hasRole('Operativo')) {
@@ -149,12 +159,12 @@ class ExpedienteService
                 ]);
 
                 foreach ($archivos as $archivo) {
-                    $registro = $this->crearArchivoConNomenclatura($servicio, $archivo, $rutasGuardadas);
+                    $registro = $this->crearArchivoConNomenclatura($servicio, $archivo, $rutasGuardadas, $usuario);
                     unset($registro);
                 }
 
                 if ($acuse !== null) {
-                    $this->crearAcuseConNomenclatura($servicio, $acuse, null, null, null, $rutasGuardadas);
+                    $this->crearAcuseConNomenclatura($servicio, $acuse, null, null, null, $rutasGuardadas, $usuario);
                 }
 
                 return $servicio->load(['areaSolicitante', 'estado', 'partidas.departamento', 'partidas.tipoServicio', 'archivos', 'acuses']);
@@ -166,6 +176,67 @@ class ExpedienteService
 
             throw $exception;
         }
+    }
+
+    /**
+     * Corrige metadatos de cabecera del oficio (servicios) por usuario autorizado, conservando auditoría (RF-007 / RF-020).
+     */
+    public function actualizarExpediente(Servicio $servicio, array $datos, User $usuario): Servicio
+    {
+        Gate::forUser($usuario)->authorize('update', $servicio);
+
+        $normalizados = [
+            'numero_oficio' => $this->textoOpcional($datos['numero_oficio'] ?? null),
+            'fecha_oficio' => $this->textoOpcional($datos['fecha_oficio'] ?? null),
+            'fecha_recepcion' => trim((string) ($datos['fecha_recepcion'] ?? '')),
+            'area_solicitante_id' => $this->enteroOpcional($datos['area_solicitante_id'] ?? null),
+            'nombre_solicitante' => trim((string) ($datos['nombre_solicitante'] ?? '')),
+            'dirigido_a' => trim((string) ($datos['dirigido_a'] ?? '')),
+            'asunto' => trim((string) ($datos['asunto'] ?? '')),
+            'descripcion' => $this->textoOpcional($datos['descripcion'] ?? null),
+        ];
+
+        $validados = Validator::make($normalizados, [
+            'numero_oficio' => ['nullable', 'string', 'max:100'],
+            'fecha_oficio' => ['nullable', 'date'],
+            'fecha_recepcion' => ['required', 'date'],
+            'area_solicitante_id' => ['required', 'integer', 'exists:cat_areas,id'],
+            'nombre_solicitante' => ['required', 'string', 'max:255'],
+            'dirigido_a' => ['required', 'string', 'max:255'],
+            'asunto' => ['required', 'string', 'max:500'],
+            'descripcion' => ['nullable', 'string', 'max:5000'],
+        ])->validate();
+
+        $cambioArea = (int) $servicio->area_solicitante_id !== (int) $validados['area_solicitante_id'];
+        if ($cambioArea) {
+            $area = Area::findOrFail($validados['area_solicitante_id']);
+            if (! $area->activo) {
+                throw ValidationException::withMessages([
+                    'area_solicitante_id' => 'El área solicitante seleccionada está inactiva.',
+                ]);
+            }
+        }
+
+        return DB::transaction(function () use ($servicio, $validados, $usuario): Servicio {
+            $bloqueado = Servicio::whereKey($servicio->getKey())->lockForUpdate()->firstOrFail();
+            Gate::forUser($usuario)->authorize('update', $bloqueado);
+
+            $fechaRecepcion = Carbon::parse($validados['fecha_recepcion']);
+
+            $bloqueado->update([
+                'numero_oficio' => $validados['numero_oficio'],
+                'fecha_oficio' => $validados['fecha_oficio'],
+                'fecha_recepcion' => $fechaRecepcion,
+                'ejercicio' => (int) $fechaRecepcion->year,
+                'area_solicitante_id' => $validados['area_solicitante_id'],
+                'nombre_solicitante' => $validados['nombre_solicitante'],
+                'dirigido_a' => $validados['dirigido_a'],
+                'asunto' => $validados['asunto'],
+                'descripcion' => $validados['descripcion'],
+            ]);
+
+            return $bloqueado->fresh(['areaSolicitante', 'estado', 'usuario']);
+        });
     }
 
     /**
@@ -246,7 +317,7 @@ class ExpedienteService
         $rutasGuardadas = [];
 
         try {
-            return DB::transaction(fn (): ServicioArchivo => $this->crearArchivoConNomenclatura($servicio, $archivo, $rutasGuardadas));
+            return DB::transaction(fn (): ServicioArchivo => $this->crearArchivoConNomenclatura($servicio, $archivo, $rutasGuardadas, $usuario));
         } catch (Throwable $exception) {
             foreach ($rutasGuardadas as $ruta) {
                 Storage::disk(self::DISCO_DOCUMENTOS)->delete($ruta);
@@ -303,6 +374,7 @@ class ExpedienteService
                     $acuseOriginal !== null ? $motivo : null,
                     $acuseOriginal !== null ? $usuario->id : null,
                     $rutasGuardadas,
+                    $usuario,
                 );
             });
         } catch (Throwable $exception) {
@@ -317,24 +389,39 @@ class ExpedienteService
     /**
      * @param  array<int, string>  $rutasGuardadas
      */
-    private function crearArchivoConNomenclatura(Servicio $servicio, UploadedFile $archivo, array &$rutasGuardadas): ServicioArchivo
-    {
-        $temporal = 'tmp-'.Str::uuid().'.pdf';
-        $registro = ServicioArchivo::create([
-            'servicio_id' => $servicio->id,
-            'nombre' => $temporal,
-            'ruta' => $temporal,
-        ]);
+    private function crearArchivoConNomenclatura(
+        Servicio $servicio,
+        UploadedFile $archivo,
+        array &$rutasGuardadas,
+        ?User $actor = null,
+    ): ServicioArchivo {
+        $registro = activity()->withoutLogs(function () use ($servicio, $archivo, &$rutasGuardadas): ServicioArchivo {
+            $temporal = 'tmp-'.Str::uuid().'.pdf';
+            $nuevo = ServicioArchivo::create([
+                'servicio_id' => $servicio->id,
+                'nombre' => $temporal,
+                'ruta' => $temporal,
+            ]);
 
-        // RF-008: SERVICIO_[servicio_id]_[identificador_archivo].pdf en servicios/[servicio_id]/archivos/
-        $nombreFinal = "SERVICIO_{$servicio->id}_{$registro->id}.pdf";
-        $rutaFinal = $archivo->storeAs("servicios/{$servicio->id}/archivos", $nombreFinal, self::DISCO_DOCUMENTOS);
-        $rutasGuardadas[] = $rutaFinal;
+            // RF-008: SERVICIO_[servicio_id]_[identificador_archivo].pdf en servicios/[servicio_id]/archivos/
+            $nombreFinal = "SERVICIO_{$servicio->id}_{$nuevo->id}.pdf";
+            $rutaFinal = $archivo->storeAs("servicios/{$servicio->id}/archivos", $nombreFinal, self::DISCO_DOCUMENTOS);
+            $rutasGuardadas[] = $rutaFinal;
 
-        $registro->update([
-            'nombre' => $nombreFinal,
-            'ruta' => $rutaFinal,
-        ]);
+            $nuevo->update([
+                'nombre' => $nombreFinal,
+                'ruta' => $rutaFinal,
+            ]);
+
+            return $nuevo;
+        });
+
+        activity('documentos')
+            ->causedBy($actor)
+            ->performedOn($registro)
+            ->event('created')
+            ->withProperties(['attributes' => $registro->only(['nombre', 'ruta', 'servicio_id'])])
+            ->log('Archivo digital del oficio registrado');
 
         return $registro;
     }
@@ -349,26 +436,54 @@ class ExpedienteService
         ?string $motivoSustitucion,
         ?int $sustituidoPor,
         array &$rutasGuardadas,
+        ?User $actor = null,
     ): ServicioAcuse {
-        $temporal = 'tmp-'.Str::uuid().'.pdf';
-        $registro = ServicioAcuse::create([
-            'servicio_id' => $servicio->id,
-            'nombre' => $temporal,
-            'ruta' => $temporal,
-            'acuse_original_id' => $acuseOriginalId,
-            'motivo_sustitucion' => $motivoSustitucion,
-            'sustituido_por' => $sustituidoPor,
-        ]);
+        $registro = activity()->withoutLogs(function () use (
+            $servicio,
+            $archivo,
+            $acuseOriginalId,
+            $motivoSustitucion,
+            $sustituidoPor,
+            &$rutasGuardadas
+        ): ServicioAcuse {
+            $temporal = 'tmp-'.Str::uuid().'.pdf';
+            $nuevo = ServicioAcuse::create([
+                'servicio_id' => $servicio->id,
+                'nombre' => $temporal,
+                'ruta' => $temporal,
+                'acuse_original_id' => $acuseOriginalId,
+                'motivo_sustitucion' => $motivoSustitucion,
+                'sustituido_por' => $sustituidoPor,
+            ]);
 
-        // RF-009: ACUSE_[servicio_id]_[identificador_acuse].pdf en servicios/[servicio_id]/acuses/
-        $nombreFinal = "ACUSE_{$servicio->id}_{$registro->id}.pdf";
-        $rutaFinal = $archivo->storeAs("servicios/{$servicio->id}/acuses", $nombreFinal, self::DISCO_DOCUMENTOS);
-        $rutasGuardadas[] = $rutaFinal;
+            // RF-009: ACUSE_[servicio_id]_[identificador_acuse].pdf en servicios/[servicio_id]/acuses/
+            $nombreFinal = "ACUSE_{$servicio->id}_{$nuevo->id}.pdf";
+            $rutaFinal = $archivo->storeAs("servicios/{$servicio->id}/acuses", $nombreFinal, self::DISCO_DOCUMENTOS);
+            $rutasGuardadas[] = $rutaFinal;
 
-        $registro->update([
-            'nombre' => $nombreFinal,
-            'ruta' => $rutaFinal,
-        ]);
+            $nuevo->update([
+                'nombre' => $nombreFinal,
+                'ruta' => $rutaFinal,
+            ]);
+
+            return $nuevo;
+        });
+
+        activity('documentos')
+            ->causedBy($actor)
+            ->performedOn($registro)
+            ->event('created')
+            ->withProperties([
+                'attributes' => $registro->only([
+                    'nombre',
+                    'ruta',
+                    'servicio_id',
+                    'acuse_original_id',
+                    'motivo_sustitucion',
+                    'sustituido_por',
+                ]),
+            ])
+            ->log($acuseOriginalId !== null ? 'Acuse sustituido' : 'Acuse de recibo registrado');
 
         return $registro;
     }

@@ -79,10 +79,15 @@ class SolicitudMaterialPolicy
 
     private function canSubmit(User $user, SolicitudMaterial $solicitud): bool
     {
-        return (int) $solicitud->usuario_solicitante_id === (int) $user->id
-            && in_array($solicitud->estado, ['BORRADOR', 'INFORMACION_REQUERIDA'], true)
-            && $solicitud->partidaOriginal !== null
-            && $this->requestingChief($user, $solicitud->partidaOriginal);
+        if ($solicitud->partidaOriginal === null || ! $this->requestingChief($user, $solicitud->partidaOriginal)) {
+            return false;
+        }
+
+        if ($solicitud->estado === 'BORRADOR') {
+            return (int) $solicitud->usuario_solicitante_id === (int) $user->id;
+        }
+
+        return $solicitud->estado === 'INFORMACION_REQUERIDA';
     }
 
     private function canResolve(User $user, SolicitudMaterial $solicitud, string $permission): bool

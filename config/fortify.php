@@ -162,20 +162,19 @@ return [
     */
 
     'features' => [
-        // SIGER: las cuentas las crea un administrador; no hay registro público.
+        // SIGER (RF-025): las cuentas y el restablecimiento de contraseñas los administra exclusivamente el rol Administrador.
         // Features::registration(),
-        Features::resetPasswords(),
+        // Features::resetPasswords(),
         // Features::emailVerification(),
         Features::updateProfileInformation(),
         Features::updatePasswords(),
-        Features::twoFactorAuthentication([
-            'confirm' => true,
-            'confirmPassword' => true,
-            // 'window' => 0,
-        ]),
-        Features::passkeys([
-            'confirmPassword' => true,
-        ]),
+        // Features::twoFactorAuthentication([
+        //     'confirm' => true,
+        //     'confirmPassword' => true,
+        // ]),
+        // Features::passkeys([
+        //     'confirmPassword' => true,
+        // ]),
     ],
 
 ];

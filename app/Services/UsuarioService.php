@@ -113,6 +113,10 @@ class UsuarioService
         $rolesNuevos = $this->ordenarRoles($validados['roles']);
         $this->validarAutoProteccion($usuario, $actor, $validados['activo'], $rolesNuevos);
 
+        if ($usuario->activo && ! $validados['activo']) {
+            $this->validarSinAsignacionesActivas($usuario);
+        }
+
         return DB::transaction(function () use ($usuario, $validados, $rolesNuevos, $actor): User {
             $rolesAnteriores = $this->ordenarRoles($usuario->getRoleNames()->all());
 
@@ -150,6 +154,10 @@ class UsuarioService
             throw ValidationException::withMessages([
                 'activo' => 'No puedes desactivar tu propia cuenta de usuario.',
             ]);
+        }
+
+        if ($usuario->activo) {
+            $this->validarSinAsignacionesActivas($usuario);
         }
 
         return DB::transaction(function () use ($usuario): User {
@@ -239,6 +247,16 @@ class UsuarioService
         if ((int) $operativo->departamento_id !== $departamentoId) {
             throw ValidationException::withMessages([
                 'departamento_id' => 'Este usuario está vinculado a un operativo en otro departamento. Actualiza primero su ficha en Catálogos.',
+            ]);
+        }
+    }
+
+    private function validarSinAsignacionesActivas(User $usuario): void
+    {
+        $operativo = $usuario->operativo;
+        if ($operativo !== null && $operativo->asignaciones()->where('activo', true)->exists()) {
+            throw ValidationException::withMessages([
+                'activo' => 'No se puede desactivar la cuenta porque su operativo vinculado mantiene asignaciones activas en partidas en curso.',
             ]);
         }
     }
