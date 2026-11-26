@@ -14,7 +14,9 @@ class PermisosHelpDeskSeeder extends Seeder
     {
         $permisos = [
             'servicios.ver', 'servicios.crear', 'partidas.ver', 'partidas.crear',
-            'partidas.turnar', 'partidas.returnar', 'partidas.cancelar',
+            'partidas.editar', 'partidas.turnar', 'partidas.returnar', 'partidas.regresar_direccion',
+            'partidas.iniciar_atencion', 'partidas.devolver', 'partidas.reanudar',
+            'partidas.concluir', 'partidas.cancelar',
             'solicitudes_materiales.ver', 'solicitudes_materiales.crear',
             'solicitudes_materiales.editar', 'solicitudes_materiales.enviar',
             'solicitudes_materiales.revisar', 'solicitudes_materiales.solicitar_informacion',
@@ -25,17 +27,25 @@ class PermisosHelpDeskSeeder extends Seeder
 
         $consulta = ['servicios.ver', 'partidas.ver', 'documentos.ver', 'documentos.descargar'];
         $asignaciones = ['operativos_partida.asignar', 'operativos_partida.finalizar'];
+        $operacionDepartamental = [
+            'partidas.iniciar_atencion',
+            'partidas.devolver',
+            'partidas.reanudar',
+            'partidas.concluir',
+        ];
         $direccion = array_values(array_diff($permisos, [
+            'partidas.regresar_direccion',
             'solicitudes_materiales.crear',
             'solicitudes_materiales.editar',
             'solicitudes_materiales.enviar',
         ]));
 
-        // Los alcances G, D, A y R requieren Policies; las celdas P no se conceden.
+        // Los alcances G, D, A y R requieren Policies.
         $matriz = [
             'Super usuario' => array_values(array_diff($direccion, ['partidas.cancelar'])),
             'Administrador' => $direccion,
-            'Jefe' => array_merge($consulta, $asignaciones, [
+            'Jefe' => array_merge($consulta, $asignaciones, $operacionDepartamental, [
+                'partidas.regresar_direccion',
                 'partidas.cancelar',
                 'solicitudes_materiales.ver',
                 'solicitudes_materiales.crear',
@@ -43,11 +53,15 @@ class PermisosHelpDeskSeeder extends Seeder
                 'solicitudes_materiales.enviar',
                 'solicitudes_materiales.ver_historial',
             ]),
-            'Recepción/Coordinador' => array_merge($consulta, $asignaciones, [
+            'Recepción/Coordinador' => array_merge($consulta, $asignaciones, $operacionDepartamental, [
                 'servicios.crear',
+                'partidas.editar',
                 'partidas.turnar',
             ]),
-            'Operativo' => $consulta,
+            'Operativo' => array_merge($consulta, [
+                'partidas.iniciar_atencion',
+                'partidas.concluir',
+            ]),
         ];
 
         $registrar = app(PermissionRegistrar::class);

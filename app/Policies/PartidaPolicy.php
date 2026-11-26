@@ -26,6 +26,27 @@ class PartidaPolicy
             ])->exists();
     }
 
+    public function update(User $user, Partida $partida): bool
+    {
+        if (! $this->permits($user, 'partidas.editar')
+            || $partida->servicio_folio_id !== null
+            || ! $this->stateIs($partida, ['REGISTRADO', 'EN_REVISION'])) {
+            return false;
+        }
+
+        if ($this->generalAccess($user)) {
+            return true;
+        }
+
+        if ($this->centralReceptionAccess($user)) {
+            return $this->canReadPartida($user, $partida);
+        }
+
+        return $user->hasRole('Recepción/Coordinador')
+            && $this->departmentAccess($user, $partida)
+            && $partida->servicio()->where('es_via_rapida', true)->exists();
+    }
+
     public function turnar(User $user, Partida $partida, Departamento $destino): bool
     {
         if (! $this->permits($user, 'partidas.turnar') || ! $destino->activo
@@ -49,7 +70,53 @@ class PartidaPolicy
             && $partida->departamento_id !== null
             && (int) $partida->departamento_id !== (int) $destino->id
             && $partida->servicio_folio_id !== null
+            && $this->stateIs($partida, ['TURNADO', 'EN_ATENCION', 'EN_REVISION']);
+    }
+
+    public function regresarDireccion(User $user, Partida $partida): bool
+    {
+        return $this->permits($user, 'partidas.regresar_direccion')
+            && $user->hasRole('Jefe')
+            && $this->departmentAccess($user, $partida)
+            && $partida->servicio_folio_id !== null
             && $this->stateIs($partida, ['TURNADO', 'EN_ATENCION']);
+    }
+
+    public function iniciarAtencion(User $user, Partida $partida): bool
+    {
+        return $this->permits($user, 'partidas.iniciar_atencion')
+            && ($this->generalAccess($user)
+                || $this->departmentAccess($user, $partida)
+                || $this->assignedAccess($user, $partida))
+            && $partida->departamento_id !== null
+            && $partida->servicio_folio_id !== null
+            && $this->stateIs($partida, ['TURNADO']);
+    }
+
+    public function devolver(User $user, Partida $partida): bool
+    {
+        return $this->permits($user, 'partidas.devolver')
+            && ($this->generalAccess($user) || $this->departmentAccess($user, $partida))
+            && $this->stateIs($partida, ['TURNADO', 'EN_ATENCION'])
+            && ! $partida->devoluciones()->whereNull('resultado_cierre')->exists();
+    }
+
+    public function reanudar(User $user, Partida $partida): bool
+    {
+        return $this->permits($user, 'partidas.reanudar')
+            && ($this->generalAccess($user) || $this->departmentAccess($user, $partida))
+            && $this->stateIs($partida, ['DEVUELTO_AREA'])
+            && $partida->devoluciones()->whereNull('resultado_cierre')->exists();
+    }
+
+    public function concluir(User $user, Partida $partida): bool
+    {
+        return $this->permits($user, 'partidas.concluir')
+            && ($this->generalAccess($user)
+                || $this->departmentAccess($user, $partida)
+                || $this->assignedAccess($user, $partida))
+            && $this->stateIs($partida, ['EN_ATENCION'])
+            && ! $partida->registroConclusion()->exists();
     }
 
     public function cancelar(User $user, Partida $partida): bool

@@ -26,12 +26,19 @@ class DatabaseSeeder extends Seeder
         $user = User::updateOrCreate(
             ['email' => 'test@example.com'],
             [
+<<<<<<< HEAD
                 'name' => 'Leticia Sedas',
+=======
+                'name' => 'Johan Morales',
+                'username' => 'jmorales',
+>>>>>>> johan
                 'password' => bcrypt('password'),
                 'activo' => true,
             ]
         );
 
         $user->syncRoles(['Super usuario', 'Administrador']);
+
+        $this->call(PersonalInicialSeeder::class);
     }
 }

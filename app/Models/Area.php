@@ -4,13 +4,14 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
-use Illuminate\Database\Eloquent\Relations\HasOne;
+use Spatie\Activitylog\LogOptions;
+use Spatie\Activitylog\Traits\LogsActivity;
 
 class Area extends Model
 {
     use HasFactory;
+    use LogsActivity;
 
     protected $table = 'cat_areas';
 
@@ -21,6 +22,15 @@ class Area extends Model
         return [
             'activo' => 'boolean',
         ];
+    }
+
+    public function getActivitylogOptions(): LogOptions
+    {
+        return LogOptions::defaults()
+            ->useLogName('catalogos')
+            ->logOnly(['clave', 'nombre', 'titular', 'tipo_area', 'activo'])
+            ->logOnlyDirty()
+            ->dontSubmitEmptyLogs();
     }
 
     public function servicios(): HasMany { return $this->hasMany(Servicio::class, 'area_solicitante_id'); }

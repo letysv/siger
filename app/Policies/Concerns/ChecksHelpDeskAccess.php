@@ -23,6 +23,12 @@ trait ChecksHelpDeskAccess
         return $user->hasAnyRole(['Super usuario', 'Administrador']);
     }
 
+    protected function centralReceptionAccess(User $user): bool
+    {
+        return $user->departamento_id === null
+            && $user->hasRole('Recepción/Coordinador');
+    }
+
     protected function departmentAccess(User $user, Partida $partida): bool
     {
         return $user->departamento_id !== null
@@ -42,15 +48,33 @@ trait ChecksHelpDeskAccess
 
     protected function canReadPartida(User $user, Partida $partida): bool
     {
-        return $this->generalAccess($user)
+        if ($this->generalAccess($user)
             || $this->departmentAccess($user, $partida)
-            || $this->assignedAccess($user, $partida);
+            || $this->assignedAccess($user, $partida)) {
+            return true;
+        }
+
+        if ($this->centralReceptionAccess($user)) {
+            return Partida::whereKey($partida->getKey())
+                ->where(function ($query) use ($user): void {
+                    $query->whereNull('departamento_id')
+                        ->orWhereHas('servicio', fn ($servicio) => $servicio->where('usuario_id', $user->id));
+                })
+                ->exists();
+        }
+
+        return false;
     }
 
     protected function canReadServicio(User $user, Servicio $servicio): bool
     {
         if ($this->generalAccess($user)) {
             return true;
+        }
+
+        if ($this->centralReceptionAccess($user)) {
+            return (int) $servicio->usuario_id === (int) $user->id
+                || $servicio->partidas()->whereNull('departamento_id')->exists();
         }
 
         return $servicio->partidas()->where(function ($query) use ($user): void {
