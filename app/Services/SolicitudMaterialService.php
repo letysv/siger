@@ -277,12 +277,13 @@ class SolicitudMaterialService
         ];
 
         $validados = Validator::make($normalizados, [
-            'tipo_servicio_id' => ['nullable', 'integer', 'exists:cat_tipo_servicios,id'],
+            'tipo_servicio_id' => ['required', 'integer', 'exists:cat_tipo_servicios,id'],
             'concepto' => ['required', 'string', 'max:2000'],
             'cantidad_solicitada' => ['nullable', 'numeric', 'min:0.01', 'max:99999999.99'],
             'unidad_medida' => ['nullable', 'string', 'max:100'],
             'observaciones_direccion' => ['nullable', 'string', 'max:2000'],
         ], [
+            'tipo_servicio_id.required' => 'Debes seleccionar el tipo de servicio para la partida de Adquisiciones.',
             'concepto.required' => 'Debes capturar el concepto de la nueva partida para Adquisiciones.',
         ])->validate();
 

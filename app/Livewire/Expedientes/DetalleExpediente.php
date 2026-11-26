@@ -2,6 +2,7 @@
 
 namespace App\Livewire\Expedientes;
 
+use App\Models\Area;
 use App\Models\Departamento;
 use App\Models\Partida;
 use App\Models\Servicio;
@@ -24,6 +25,8 @@ class DetalleExpediente extends Component
 
     public Servicio $servicio;
 
+    public bool $modalEditarExpedienteAbierto = false;
+
     public bool $modalPartidaAbierto = false;
 
     public ?int $partidaEditandoId = null;
@@ -37,6 +40,18 @@ class DetalleExpediente extends Component
     public mixed $nuevoArchivo = null;
 
     public mixed $nuevoAcuse = null;
+
+    /** @var array<string, mixed> */
+    public array $expedienteForm = [
+        'numero_oficio' => '',
+        'fecha_oficio' => '',
+        'fecha_recepcion' => '',
+        'area_solicitante_id' => '',
+        'nombre_solicitante' => '',
+        'dirigido_a' => '',
+        'asunto' => '',
+        'descripcion' => '',
+    ];
 
     /** @var array<string, mixed> */
     public array $partidaForm = [
@@ -56,6 +71,59 @@ class DetalleExpediente extends Component
     {
         Gate::authorize('view', $servicio);
         $this->servicio = $servicio;
+    }
+
+    public function abrirEditarExpediente(): void
+    {
+        $expediente = Servicio::findOrFail($this->servicio->getKey());
+        Gate::authorize('update', $expediente);
+
+        $this->limpiarMensajes();
+        $this->resetValidation();
+        $this->expedienteForm = [
+            'numero_oficio' => (string) ($expediente->numero_oficio ?? ''),
+            'fecha_oficio' => $expediente->fecha_oficio ? $expediente->fecha_oficio->format('Y-m-d') : '',
+            'fecha_recepcion' => $expediente->fecha_recepcion ? $expediente->fecha_recepcion->format('Y-m-d\TH:i') : '',
+            'area_solicitante_id' => (string) $expediente->area_solicitante_id,
+            'nombre_solicitante' => (string) $expediente->nombre_solicitante,
+            'dirigido_a' => (string) $expediente->dirigido_a,
+            'asunto' => (string) $expediente->asunto,
+            'descripcion' => (string) ($expediente->descripcion ?? ''),
+        ];
+        $this->modalEditarExpedienteAbierto = true;
+    }
+
+    public function cerrarModalEditarExpediente(): void
+    {
+        $this->modalEditarExpedienteAbierto = false;
+        $this->resetValidation();
+    }
+
+    public function guardarExpediente(ExpedienteService $expedienteService): void
+    {
+        $this->limpiarMensajes();
+        $this->resetValidation();
+
+        $expediente = Servicio::findOrFail($this->servicio->getKey());
+        Gate::authorize('update', $expediente);
+
+        /** @var User $usuario */
+        $usuario = Auth::user();
+
+        try {
+            $this->servicio = $expedienteService->actualizarExpediente($expediente, $this->expedienteForm, $usuario);
+        } catch (ValidationException $e) {
+            foreach ($e->errors() as $campo => $mensajes) {
+                foreach ($mensajes as $mensaje) {
+                    $this->addError("expedienteForm.{$campo}", $mensaje);
+                }
+            }
+
+            return;
+        }
+
+        $this->cerrarModalEditarExpediente();
+        $this->mensajeExito = 'Los datos generales del expediente se actualizaron correctamente.';
     }
 
     public function abrirModalPartida(): void
@@ -268,15 +336,24 @@ class DetalleExpediente extends Component
         $acusesVigentes = $expediente->acuses->filter(fn (ServicioAcuse $a): bool => $a->sustituto === null)->values();
         $acusesHistoricos = $expediente->acuses->filter(fn (ServicioAcuse $a): bool => $a->sustituto !== null)->values();
 
+        $areasDisponibles = $this->modalEditarExpedienteAbierto
+            ? Area::where('activo', true)
+                ->orWhere('id', $expediente->area_solicitante_id)
+                ->orderBy('nombre')
+                ->get()
+            : collect();
+
         return view('livewire.expedientes.detalle-expediente', [
             'expediente' => $expediente,
             'partidas' => $partidasVisibles,
             'partidasDevueltasCount' => $partidasDevueltasCount,
             'acusesVigentes' => $acusesVigentes,
             'acusesHistoricos' => $acusesHistoricos,
+            'areasDisponibles' => $areasDisponibles,
             'tiposServicio' => $tiposServicio,
             'departamentos' => Departamento::where('activo', true)->orderBy('nombre')->get(),
             'requiereCantidad' => $tipoSeleccionado?->requiere_cantidad ?? false,
+            'puedeEditarExpediente' => Gate::allows('update', $expediente),
             'puedeAgregarPartida' => Gate::allows('create', [Partida::class, $expediente]),
             'puedeAdjuntar' => Gate::allows('adjuntarDocumento', $expediente),
         ]);

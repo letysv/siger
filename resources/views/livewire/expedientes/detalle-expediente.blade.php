@@ -70,6 +70,13 @@
                 <div>Ejercicio: <span class="font-semibold text-slate-700">{{ $expediente->ejercicio }}</span></div>
                 <div>Recepción: <span class="font-semibold text-slate-700">{{ $expediente->fecha_recepcion?->format('d/m/Y H:i') }}</span></div>
                 <div>Capturó: <span class="font-semibold text-slate-700">{{ $expediente->usuario?->name }}</span></div>
+                @if ($puedeEditarExpediente)
+                    <div class="pt-1">
+                        <button type="button" wire:click="abrirEditarExpediente" class="font-semibold text-indigo-700 hover:text-indigo-900">
+                            Editar datos del oficio
+                        </button>
+                    </div>
+                @endif
             </div>
         </div>
 
@@ -117,19 +124,28 @@
 
     {{-- Partidas del expediente --}}
     <div class="bg-white rounded-xl shadow-sm border border-slate-200">
-        <div class="px-6 py-4 border-b border-slate-100 flex items-center justify-between gap-4">
+        <div class="px-6 py-4 border-b border-slate-100 flex flex-wrap items-center justify-between gap-4">
             <div>
                 <h4 class="font-bold text-slate-800">Partidas del expediente</h4>
                 <p class="text-xs text-slate-500">Cada partida conserva su número único e historial independiente.</p>
             </div>
 
-            @if ($puedeAgregarPartida)
-                <button type="button"
-                        wire:click="abrirModalPartida"
-                        class="inline-flex items-center gap-1.5 px-3 py-2 bg-siger-700 hover:bg-siger-800 text-white text-xs font-semibold uppercase tracking-wider rounded-lg">
-                    + Agregar partida
-                </button>
-            @endif
+            <div class="flex items-center gap-3">
+                @if (Auth::user()?->checkPermissionTo('partidas.ver', 'web') && $partidas->isNotEmpty())
+                    <a href="{{ route('partidas.index', ['expediente' => $expediente->id]) }}"
+                       class="inline-flex items-center gap-1 px-3 py-2 border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 text-xs font-semibold rounded-lg">
+                        Gestionar / Turnar en Partidas →
+                    </a>
+                @endif
+
+                @if ($puedeAgregarPartida)
+                    <button type="button"
+                            wire:click="abrirModalPartida"
+                            class="inline-flex items-center gap-1.5 px-3 py-2 bg-siger-700 hover:bg-siger-800 text-white text-xs font-semibold uppercase tracking-wider rounded-lg">
+                        + Agregar partida
+                    </button>
+                @endif
+            </div>
         </div>
 
         <div class="overflow-x-auto">
@@ -153,6 +169,9 @@
                                 <div class="font-medium text-slate-800">{{ $partida->concepto }}</div>
                                 @if ($partida->tipoServicio)
                                     <div class="text-xs text-slate-500">{{ $partida->tipoServicio->descripcion }}</div>
+                                @endif
+                                @if ($partida->observaciones)
+                                    <div class="text-xs text-amber-800 mt-1 line-clamp-2">{{ $partida->observaciones }}</div>
                                 @endif
                             </td>
                             <td class="px-6 py-3.5 text-slate-600">
@@ -407,6 +426,80 @@
         <x-slot name="footer">
             <x-secondary-button wire:click="cerrarModalAcuse">Cancelar</x-secondary-button>
             <x-button class="ms-3" type="submit" form="form-acuse-expediente">Guardar acuse</x-button>
+        </x-slot>
+    </x-dialog-modal>
+
+    {{-- Modal editar datos generales del oficio --}}
+    <x-dialog-modal wire:model.live="modalEditarExpedienteAbierto" maxWidth="xl">
+        <x-slot name="title">
+            Editar datos del oficio — Expediente #{{ $expediente->id }}
+        </x-slot>
+
+        <x-slot name="content">
+            <form wire:submit="guardarExpediente" id="form-editar-expediente" class="space-y-4">
+                <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                    <div>
+                        <x-label for="ed_num_oficio" value="Número de oficio" />
+                        <x-input id="ed_num_oficio" type="text" maxlength="100" class="mt-1 block w-full" wire:model="expedienteForm.numero_oficio" />
+                        <x-input-error for="expedienteForm.numero_oficio" class="mt-1" />
+                    </div>
+                    <div>
+                        <x-label for="ed_fecha_oficio" value="Fecha de oficio" />
+                        <x-input id="ed_fecha_oficio" type="date" class="mt-1 block w-full" wire:model="expedienteForm.fecha_oficio" />
+                        <x-input-error for="expedienteForm.fecha_oficio" class="mt-1" />
+                    </div>
+                    <div>
+                        <x-label for="ed_fecha_recepcion" value="Fecha y hora de recepción *" />
+                        <x-input id="ed_fecha_recepcion" type="datetime-local" class="mt-1 block w-full" wire:model="expedienteForm.fecha_recepcion" />
+                        <x-input-error for="expedienteForm.fecha_recepcion" class="mt-1" />
+                    </div>
+                </div>
+
+                <div>
+                    <x-label for="ed_area" value="Área solicitante *" />
+                    <select id="ed_area" wire:model="expedienteForm.area_solicitante_id"
+                            class="mt-1 block w-full border-gray-300 focus:border-indigo-500 focus:ring-indigo-500 rounded-md shadow-sm text-sm">
+                        <option value="">Selecciona un área...</option>
+                        @foreach ($areasDisponibles as $area)
+                            <option value="{{ $area->id }}">{{ $area->clave }} — {{ $area->nombre }}</option>
+                        @endforeach
+                    </select>
+                    <x-input-error for="expedienteForm.area_solicitante_id" class="mt-1" />
+                </div>
+
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                        <x-label for="ed_solicitante" value="Nombre del solicitante *" />
+                        <x-input id="ed_solicitante" type="text" maxlength="255" class="mt-1 block w-full" wire:model="expedienteForm.nombre_solicitante" />
+                        <x-input-error for="expedienteForm.nombre_solicitante" class="mt-1" />
+                    </div>
+                    <div>
+                        <x-label for="ed_dirigido" value="Dirigido a *" />
+                        <x-input id="ed_dirigido" type="text" maxlength="255" class="mt-1 block w-full" wire:model="expedienteForm.dirigido_a" />
+                        <x-input-error for="expedienteForm.dirigido_a" class="mt-1" />
+                    </div>
+                </div>
+
+                <div>
+                    <x-label for="ed_asunto" value="Asunto *" />
+                    <x-input id="ed_asunto" type="text" maxlength="500" class="mt-1 block w-full" wire:model="expedienteForm.asunto" />
+                    <x-input-error for="expedienteForm.asunto" class="mt-1" />
+                </div>
+
+                <div>
+                    <x-label for="ed_descripcion" value="Descripción adicional" />
+                    <textarea id="ed_descripcion" rows="3" wire:model="expedienteForm.descripcion"
+                              class="mt-1 block w-full border-gray-300 focus:border-indigo-500 focus:ring-indigo-500 rounded-md shadow-sm text-sm"></textarea>
+                    <x-input-error for="expedienteForm.descripcion" class="mt-1" />
+                </div>
+            </form>
+        </x-slot>
+
+        <x-slot name="footer">
+            <x-secondary-button wire:click="cerrarModalEditarExpediente">Cancelar</x-secondary-button>
+            <x-button class="ms-3" type="submit" form="form-editar-expediente" wire:loading.attr="disabled">
+                Guardar cambios
+            </x-button>
         </x-slot>
     </x-dialog-modal>
         </div>

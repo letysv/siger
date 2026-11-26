@@ -6,6 +6,7 @@ use App\Models\ConsecutivoFolio;
 use App\Models\Departamento;
 use App\Models\Estado;
 use App\Models\HistorialDevolucion;
+use App\Models\HistorialSolicitudMaterial;
 use App\Models\HistorialTurnado;
 use App\Models\Operativo;
 use App\Models\OperativoPartida;
@@ -13,6 +14,7 @@ use App\Models\Partida;
 use App\Models\RegistroOperativo;
 use App\Models\Servicio;
 use App\Models\ServicioFolio;
+use App\Models\SolicitudMaterial;
 use App\Models\TipoServicio;
 use App\Models\User;
 use Carbon\CarbonInterface;
@@ -59,7 +61,17 @@ class PartidaService
 
             if ($usuario->departamento_id !== null
                 && $usuario->hasAnyRole(['Jefe', 'Recepción/Coordinador'])) {
-                $query->orWhere('departamento_id', $usuario->departamento_id);
+                $query->orWhere(function (Builder $deptQuery) use ($usuario): void {
+                    $deptQuery->where('departamento_id', $usuario->departamento_id)
+                        ->where(function (Builder $visibilidad) use ($usuario): void {
+                            $visibilidad->whereNotNull('servicio_folio_id')
+                                ->orWhereHas('estado', fn (Builder $e) => $e->where('clave', '!=', 'REGISTRADO'));
+
+                            if ($usuario->hasRole('Recepción/Coordinador')) {
+                                $visibilidad->orWhereHas('servicio', fn (Builder $s) => $s->where('es_via_rapida', true));
+                            }
+                        });
+                });
             }
 
             if ($usuario->hasRole('Operativo')) {
@@ -149,6 +161,12 @@ class PartidaService
 
             $ahora = now();
             $this->finalizarAsignacionesActivas($partidaBloqueada, $ahora);
+            $this->cerrarSolicitudesMaterialesAbiertas(
+                $partidaBloqueada,
+                $usuario,
+                $ahora,
+                "Cerrada administrativamente por re-turnado de la partida origen hacia {$destinoActual->siglas}."
+            );
             $folioDestino = $this->obtenerOGenerarFolio($servicio, $destinoActual, $ahora);
             $estadoTurnado = Estado::where('clave', 'TURNADO')->firstOrFail();
 
@@ -198,6 +216,12 @@ class PartidaService
 
             $ahora = now();
             $this->finalizarAsignacionesActivas($partidaBloqueada, $ahora);
+            $this->cerrarSolicitudesMaterialesAbiertas(
+                $partidaBloqueada,
+                $usuario,
+                $ahora,
+                "Cerrada administrativamente al regresar la partida origen a Dirección: {$validados['motivo']}"
+            );
             $estadoRevision = Estado::where('clave', 'EN_REVISION')->firstOrFail();
 
             $nota = sprintf(
@@ -258,6 +282,12 @@ class PartidaService
 
             $ahora = now();
             $this->finalizarAsignacionesActivas($partidaBloqueada, $ahora);
+            $this->cerrarSolicitudesMaterialesAbiertas(
+                $partidaBloqueada,
+                $usuario,
+                $ahora,
+                "Cerrada administrativamente por cancelación de la partida origen: {$validados['motivo']}"
+            );
 
             if ($partidaBloqueada->estado?->clave === 'DEVUELTO_AREA') {
                 $devolucionAbierta = $partidaBloqueada->devoluciones()
@@ -571,6 +601,14 @@ class PartidaService
                     ]);
                 }
 
+                if ($partidaBloqueada->solicitudesMateriales()
+                    ->whereIn('estado', ['ENVIADA', 'INFORMACION_REQUERIDA'])
+                    ->exists()) {
+                    throw ValidationException::withMessages([
+                        'descripcion_trabajo' => 'No se puede concluir la partida mientras mantenga solicitudes de materiales enviadas o con aclaración pendiente.',
+                    ]);
+                }
+
                 $ahora = now();
                 $fechaConclusion = $partidaBloqueada->fecha_inicio !== null && $ahora->lt($partidaBloqueada->fecha_inicio)
                     ? $partidaBloqueada->fecha_inicio
@@ -578,7 +616,7 @@ class PartidaService
 
                 $evidenciasMeta = [];
                 foreach ($evidencias as $evidencia) {
-                    $ext = strtolower($evidencia->getClientOriginalExtension() ?: $evidencia->extension() ?: 'bin');
+                    $ext = strtolower($evidencia->extension() ?: $evidencia->getClientOriginalExtension() ?: 'bin');
                     $nombreArchivo = 'EVIDENCIA_'.$partidaBloqueada->id.'_'.Str::uuid().'.'.$ext;
                     $ruta = $evidencia->storeAs("partidas/{$partidaBloqueada->id}/evidencias", $nombreArchivo, self::DISCO_DOCUMENTOS);
                     $rutasGuardadas[] = $ruta;
@@ -593,7 +631,7 @@ class PartidaService
 
                 $rutaConformidad = null;
                 if (! $esAdqEntrega && $validados['conformidad_recibida'] && $archivoConformidad !== null) {
-                    $ext = strtolower($archivoConformidad->getClientOriginalExtension() ?: $archivoConformidad->extension() ?: 'pdf');
+                    $ext = strtolower($archivoConformidad->extension() ?: $archivoConformidad->getClientOriginalExtension() ?: 'pdf');
                     $nombreConf = 'CONFORMIDAD_'.$partidaBloqueada->id.'_'.Str::uuid().'.'.$ext;
                     $rutaConformidad = $archivoConformidad->storeAs("partidas/{$partidaBloqueada->id}/conformidad", $nombreConf, self::DISCO_DOCUMENTOS);
                     $rutasGuardadas[] = $rutaConformidad;
@@ -785,6 +823,38 @@ class PartidaService
                 $asignacion->update([
                     'activo' => false,
                     'fecha_finalizacion' => $fechaFinal,
+                ]);
+            });
+    }
+
+    private function cerrarSolicitudesMaterialesAbiertas(
+        Partida $partida,
+        User $actor,
+        CarbonInterface $ahora,
+        string $motivo,
+    ): void {
+        $partida->solicitudesMateriales()
+            ->whereIn('estado', ['BORRADOR', 'ENVIADA', 'INFORMACION_REQUERIDA'])
+            ->lockForUpdate()
+            ->get()
+            ->each(function (SolicitudMaterial $solicitud) use ($actor, $ahora, $motivo): void {
+                $estadoAnterior = $solicitud->estado;
+
+                $solicitud->update([
+                    'estado' => 'RECHAZADA',
+                    'usuario_resolucion_id' => $actor->id,
+                    'fecha_resolucion' => $ahora,
+                    'observaciones_direccion' => $motivo,
+                ]);
+
+                HistorialSolicitudMaterial::create([
+                    'solicitud_material_id' => $solicitud->id,
+                    'usuario_id' => $actor->id,
+                    'accion' => 'RECHAZO',
+                    'estado_anterior' => $estadoAnterior,
+                    'estado_nuevo' => 'RECHAZADA',
+                    'observaciones' => $motivo,
+                    'fecha' => $ahora,
                 ]);
             });
     }

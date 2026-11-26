@@ -62,7 +62,8 @@ return [
         // Features::profilePhotos(),
         // Features::api(),
         // Features::teams(['invitations' => true]),
-        Features::accountDeletion(),
+        // SIGER (RF-025): prohibida la eliminación física de cuentas; las bajas se gestionan con users.activo = false.
+        // Features::accountDeletion(),
     ],
 
     /*

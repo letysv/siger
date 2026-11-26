@@ -7,7 +7,9 @@ use App\Models\Estado;
 use App\Models\Operativo;
 use App\Models\OperativoPartida;
 use App\Models\Partida;
+use App\Models\TipoServicio;
 use App\Models\User;
+use App\Services\ExpedienteService;
 use App\Services\PartidaService;
 use Illuminate\Contracts\View\View;
 use Illuminate\Database\Eloquent\Builder;
@@ -16,6 +18,7 @@ use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Validation\ValidationException;
 use Livewire\Attributes\Layout;
+use Livewire\Attributes\Url;
 use Livewire\Component;
 use Livewire\WithFileUploads;
 use Livewire\WithPagination;
@@ -33,6 +36,11 @@ class ListadoPartidas extends Component
     public string $estadoFiltro = '';
 
     public string $ejercicioFiltro = '';
+
+    #[Url(as: 'expediente', except: '')]
+    public string $expedienteFiltro = '';
+
+    public bool $modalEditarPreparacionAbierto = false;
 
     public bool $modalTurnadoAbierto = false;
 
@@ -71,6 +79,16 @@ class ListadoPartidas extends Component
     public string $observacionesDevolucion = '';
 
     public string $respuestaSubsanacion = '';
+
+    /** @var array<string, mixed> */
+    public array $preparacionForm = [
+        'tipo_servicio_id' => '',
+        'concepto' => '',
+        'cantidad_solicitada' => '',
+        'unidad_medida' => '',
+        'departamento_id' => '',
+        'observaciones' => '',
+    ];
 
     /** @var array<string, mixed> */
     public array $conclusionForm = [
@@ -116,6 +134,67 @@ class ListadoPartidas extends Component
     public function updatedEjercicioFiltro(): void
     {
         $this->resetPage();
+    }
+
+    public function limpiarFiltroExpediente(): void
+    {
+        $this->expedienteFiltro = '';
+        $this->resetPage();
+    }
+
+    public function abrirEditarPreparacion(int $partidaId): void
+    {
+        $this->limpiarMensajes();
+        $this->resetValidation();
+
+        $partida = Partida::findOrFail($partidaId);
+        Gate::authorize('update', $partida);
+
+        $this->modalTurnadoAbierto = false;
+        $this->partidaSeleccionadaId = $partida->id;
+        $this->preparacionForm = [
+            'tipo_servicio_id' => $partida->tipo_servicio_id !== null ? (string) $partida->tipo_servicio_id : '',
+            'concepto' => (string) ($partida->concepto ?? ''),
+            'cantidad_solicitada' => $partida->cantidad_solicitada !== null ? (string) $partida->cantidad_solicitada : '',
+            'unidad_medida' => (string) ($partida->unidad_medida ?? ''),
+            'departamento_id' => $partida->departamento_id !== null ? (string) $partida->departamento_id : '',
+            'observaciones' => (string) ($partida->observaciones ?? ''),
+        ];
+        $this->modalEditarPreparacionAbierto = true;
+    }
+
+    public function cerrarModalEditarPreparacion(): void
+    {
+        $this->modalEditarPreparacionAbierto = false;
+        $this->partidaSeleccionadaId = null;
+        $this->resetValidation();
+    }
+
+    public function guardarPreparacion(ExpedienteService $expedienteService): void
+    {
+        $this->limpiarMensajes();
+        $this->resetValidation();
+
+        $partida = Partida::findOrFail((int) $this->partidaSeleccionadaId);
+        Gate::authorize('update', $partida);
+
+        /** @var User $usuario */
+        $usuario = Auth::user();
+
+        try {
+            $actualizada = $expedienteService->actualizarPartidaPreparacion($partida, $this->preparacionForm, $usuario);
+        } catch (ValidationException $e) {
+            foreach ($e->errors() as $campo => $mensajes) {
+                foreach ($mensajes as $mensaje) {
+                    $this->addError("preparacionForm.{$campo}", $mensaje);
+                }
+            }
+
+            return;
+        }
+
+        $this->cerrarModalEditarPreparacion();
+        $this->mensajeExito = "Datos de preparación de la partida #{$actualizada->numero_partida} actualizados correctamente.";
     }
 
     public function abrirDetalle(int $partidaId): void
@@ -624,10 +703,13 @@ class ListadoPartidas extends Component
             ->when($this->ejercicioFiltro !== '', function (Builder $q): void {
                 $q->whereHas('servicio', fn (Builder $s) => $s->where('ejercicio', (int) $this->ejercicioFiltro));
             })
+            ->when(is_numeric($this->expedienteFiltro), fn (Builder $q) => $q->where('servicio_id', (int) $this->expedienteFiltro))
             ->orderByDesc('id')
             ->paginate(12);
 
-        $departamentosActivos = Departamento::where('activo', true)->orderBy('nombre')->get();
+        $departamentos = Departamento::orderBy('nombre')->get();
+        $departamentosActivos = $departamentos->where('activo', true)->values();
+        $accionesPorPartida = $this->calcularAccionesPorPartida($partidas->getCollection(), $usuario, $departamentosActivos);
 
         $partidaModal = $this->partidaSeleccionadaId !== null
             ? Partida::with([
@@ -679,10 +761,20 @@ class ListadoPartidas extends Component
             ->orderByDesc('servicios.ejercicio')
             ->pluck('servicios.ejercicio');
 
+        $tiposServicioActivos = $this->modalEditarPreparacionAbierto
+            ? TipoServicio::where('activo', true)->orderBy('descripcion')->get()
+            : collect();
+        $tipoPreparacion = ($this->modalEditarPreparacionAbierto && is_numeric($this->preparacionForm['tipo_servicio_id'] ?? ''))
+            ? $tiposServicioActivos->firstWhere('id', (int) $this->preparacionForm['tipo_servicio_id'])
+            : null;
+
         return view('livewire.partidas.listado-partidas', [
             'partidas' => $partidas,
-            'departamentos' => Departamento::orderBy('nombre')->get(),
+            'accionesPorPartida' => $accionesPorPartida,
+            'departamentos' => $departamentos,
             'departamentosActivos' => $departamentosActivos,
+            'tiposServicioActivos' => $tiposServicioActivos,
+            'requiereCantidadPreparacion' => $tipoPreparacion?->requiere_cantidad ?? false,
             'estados' => Estado::orderBy('id')->get(),
             'ejercicios' => $ejercicios,
             'partidaModal' => $partidaModal,
@@ -737,6 +829,107 @@ class ListadoPartidas extends Component
         return $usuario->departamento_id !== null
             && $usuario->hasAnyRole(['Jefe', 'Recepción/Coordinador'])
             && (int) $partida->departamento_id === (int) $usuario->departamento_id;
+    }
+
+    /**
+     * Evalúa banderas de acciones por fila en memoria usando relaciones ya cargadas (evita ~150+ queries N+1).
+     * Cada acción del componente vuelve a autorizar en el servidor con Gate::authorize().
+     *
+     * @param  Collection<int, Partida>  $partidas
+     * @param  Collection<int, Departamento>  $departamentosActivos
+     * @return array<int, array<string, bool>>
+     */
+    private function calcularAccionesPorPartida(
+        Collection $partidas,
+        User $usuario,
+        Collection $departamentosActivos,
+    ): array {
+        $esGeneral = $usuario->hasAnyRole(['Super usuario', 'Administrador']);
+        $esAdmin = $usuario->hasRole('Administrador');
+        $esJefe = $usuario->hasRole('Jefe');
+        $esRecepcionCoord = $usuario->hasRole('Recepción/Coordinador');
+        $esOperativo = $usuario->hasRole('Operativo');
+        $esRecepcionCentral = $usuario->departamento_id === null && $esRecepcionCoord;
+
+        $permEditar = $usuario->checkPermissionTo('partidas.editar', 'web');
+        $permTurnar = $usuario->checkPermissionTo('partidas.turnar', 'web');
+        $permReturnar = $usuario->checkPermissionTo('partidas.returnar', 'web');
+        $permRegresarDir = $usuario->checkPermissionTo('partidas.regresar_direccion', 'web');
+        $permIniciar = $usuario->checkPermissionTo('partidas.iniciar_atencion', 'web');
+        $permDevolver = $usuario->checkPermissionTo('partidas.devolver', 'web');
+        $permReanudar = $usuario->checkPermissionTo('partidas.reanudar', 'web');
+        $permConcluir = $usuario->checkPermissionTo('partidas.concluir', 'web');
+        $permCancelar = $usuario->checkPermissionTo('partidas.cancelar', 'web');
+
+        $deptoUsuarioActivo = $usuario->departamento_id !== null
+            && $departamentosActivos->contains('id', $usuario->departamento_id);
+
+        $mapa = [];
+
+        foreach ($partidas as $partida) {
+            $estadoClave = $partida->estado?->clave;
+            $sinFolio = $partida->servicio_folio_id === null;
+            $mismoDepto = $usuario->departamento_id !== null
+                && (int) $partida->departamento_id === (int) $usuario->departamento_id;
+            $esViaRapida = (bool) $partida->servicio?->es_via_rapida;
+            $tieneDevolucionAbierta = $partida->devoluciones->isNotEmpty();
+            $tieneAsignacionPropia = $esOperativo && $partida->asignaciones->contains(
+                fn (OperativoPartida $a): bool => $a->activo
+                    && $a->fecha_finalizacion === null
+                    && (int) $a->operativo?->user_id === (int) $usuario->id
+            );
+            $alcanceOperativo = $esGeneral
+                || ($mismoDepto && ($esJefe || $esRecepcionCoord))
+                || $tieneAsignacionPropia;
+            $alcanceDepartamental = $esGeneral || ($mismoDepto && ($esJefe || $esRecepcionCoord));
+
+            $mapa[$partida->id] = [
+                'editar' => $permEditar
+                    && $sinFolio
+                    && in_array($estadoClave, ['REGISTRADO', 'EN_REVISION'], true)
+                    && ($esGeneral || $esRecepcionCentral || ($esRecepcionCoord && $mismoDepto && $esViaRapida)),
+                'turnar' => $permTurnar
+                    && $departamentosActivos->isNotEmpty()
+                    && $sinFolio
+                    && in_array($estadoClave, ['REGISTRADO', 'EN_REVISION'], true)
+                    && ($esGeneral || ($esRecepcionCoord && $mismoDepto && $deptoUsuarioActivo && $esViaRapida)),
+                'returnar' => $permReturnar
+                    && $esGeneral
+                    && $partida->departamento_id !== null
+                    && ! $sinFolio
+                    && in_array($estadoClave, ['TURNADO', 'EN_ATENCION', 'EN_REVISION'], true)
+                    && $departamentosActivos->contains(fn (Departamento $d): bool => (int) $d->id !== (int) $partida->departamento_id),
+                'regresar_direccion' => $permRegresarDir
+                    && $esJefe
+                    && $mismoDepto
+                    && ! $sinFolio
+                    && in_array($estadoClave, ['TURNADO', 'EN_ATENCION'], true),
+                'operativos' => $this->puedeGestionarOperativos($partida),
+                'iniciar' => $permIniciar
+                    && $partida->departamento_id !== null
+                    && ! $sinFolio
+                    && $estadoClave === 'TURNADO'
+                    && $alcanceOperativo,
+                'devolver' => $permDevolver
+                    && in_array($estadoClave, ['TURNADO', 'EN_ATENCION'], true)
+                    && ! $tieneDevolucionAbierta
+                    && $alcanceDepartamental,
+                'reanudar' => $permReanudar
+                    && $estadoClave === 'DEVUELTO_AREA'
+                    && $tieneDevolucionAbierta
+                    && $alcanceDepartamental,
+                'concluir' => $permConcluir
+                    && $estadoClave === 'EN_ATENCION'
+                    && $partida->registroConclusion === null
+                    && $alcanceOperativo,
+                'cancelar' => $permCancelar
+                    && in_array($estadoClave, ['REGISTRADO', 'EN_REVISION', 'TURNADO', 'EN_ATENCION', 'DEVUELTO_AREA'], true)
+                    && ($estadoClave !== 'DEVUELTO_AREA' || $tieneDevolucionAbierta)
+                    && ($esAdmin || ($esJefe && $mismoDepto && ($estadoClave !== 'REGISTRADO' || ! $sinFolio))),
+            ];
+        }
+
+        return $mapa;
     }
 
     /**

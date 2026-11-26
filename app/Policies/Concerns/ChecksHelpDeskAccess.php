@@ -46,10 +46,29 @@ trait ChecksHelpDeskAccess
                 ->exists();
     }
 
+    protected function readableDepartmentAccess(User $user, Partida $partida): bool
+    {
+        if ($user->departamento_id === null || ! $user->hasAnyRole(['Jefe', 'Recepción/Coordinador'])) {
+            return false;
+        }
+
+        return Partida::whereKey($partida->getKey())
+            ->where('departamento_id', $user->departamento_id)
+            ->where(function ($query) use ($user): void {
+                $query->whereNotNull('servicio_folio_id')
+                    ->orWhereHas('estado', fn ($estado) => $estado->where('clave', '!=', 'REGISTRADO'));
+
+                if ($user->hasRole('Recepción/Coordinador')) {
+                    $query->orWhereHas('servicio', fn ($servicio) => $servicio->where('es_via_rapida', true));
+                }
+            })
+            ->exists();
+    }
+
     protected function canReadPartida(User $user, Partida $partida): bool
     {
         if ($this->generalAccess($user)
-            || $this->departmentAccess($user, $partida)
+            || $this->readableDepartmentAccess($user, $partida)
             || $this->assignedAccess($user, $partida)) {
             return true;
         }
@@ -82,7 +101,17 @@ trait ChecksHelpDeskAccess
 
             if ($user->departamento_id !== null
                 && $user->hasAnyRole(['Jefe', 'Recepción/Coordinador'])) {
-                $query->orWhere('departamento_id', $user->departamento_id);
+                $query->orWhere(function ($deptQuery) use ($user): void {
+                    $deptQuery->where('departamento_id', $user->departamento_id)
+                        ->where(function ($visibilidad) use ($user): void {
+                            $visibilidad->whereNotNull('servicio_folio_id')
+                                ->orWhereHas('estado', fn ($estado) => $estado->where('clave', '!=', 'REGISTRADO'));
+
+                            if ($user->hasRole('Recepción/Coordinador')) {
+                                $visibilidad->orWhereHas('servicio', fn ($s) => $s->where('es_via_rapida', true));
+                            }
+                        });
+                });
             }
 
             if ($user->hasRole('Operativo')) {

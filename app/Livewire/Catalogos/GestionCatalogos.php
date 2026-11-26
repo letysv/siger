@@ -242,6 +242,7 @@ class GestionCatalogos extends Component
                     $q->where(function (Builder $sub) use ($busqueda): void {
                         $sub->where('nombre', 'like', "%{$busqueda}%")
                             ->orWhereHas('usuario', fn (Builder $u) => $u->where('name', 'like', "%{$busqueda}%")
+                                ->orWhere('username', 'like', "%{$busqueda}%")
                                 ->orWhere('email', 'like', "%{$busqueda}%"));
                     });
                 })

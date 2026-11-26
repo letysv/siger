@@ -122,11 +122,19 @@ class PartidaPolicy
     public function cancelar(User $user, Partida $partida): bool
     {
         if (! $this->permits($user, 'partidas.cancelar')
-            || ! ($user->hasRole('Administrador')
-                || ($user->hasRole('Jefe') && $this->departmentAccess($user, $partida)))
             || ! $this->stateIs($partida, [
                 'REGISTRADO', 'EN_REVISION', 'TURNADO', 'EN_ATENCION', 'DEVUELTO_AREA',
             ])) {
+            return false;
+        }
+
+        $autorizadoPorRol = $user->hasRole('Administrador')
+            || ($user->hasRole('Jefe')
+                && $this->departmentAccess($user, $partida)
+                && (! $this->stateIs($partida, ['REGISTRADO'])
+                    || Partida::whereKey($partida->getKey())->whereNotNull('servicio_folio_id')->exists()));
+
+        if (! $autorizadoPorRol) {
             return false;
         }
 

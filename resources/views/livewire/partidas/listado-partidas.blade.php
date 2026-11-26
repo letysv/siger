@@ -82,6 +82,17 @@
                             <option value="{{ $anio }}">{{ $anio }}</option>
                         @endforeach
                     </select>
+
+                    @if ($expedienteFiltro !== '')
+                        <div class="sm:col-span-2 lg:col-span-5 flex items-center gap-2 text-xs">
+                            <span class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-siger-50 border border-siger-200 text-siger-800 font-semibold">
+                                Filtrando por Expediente #{{ $expedienteFiltro }}
+                                <button type="button" wire:click="limpiarFiltroExpediente" class="text-siger-600 hover:text-siger-900 font-bold">
+                                    × Mostrar todas
+                                </button>
+                            </span>
+                        </div>
+                    @endif
                 </div>
 
                 <div class="overflow-x-auto">
@@ -98,15 +109,17 @@
                         <tbody class="divide-y divide-slate-100 bg-white">
                             @forelse ($partidas as $partida)
                                 @php
-                                    $puedeTurnar = $departamentosActivos->contains(fn ($d) => \Illuminate\Support\Facades\Gate::allows('turnar', [$partida, $d]));
-                                    $puedeReturnar = $departamentosActivos->contains(fn ($d) => \Illuminate\Support\Facades\Gate::allows('returnar', [$partida, $d]));
-                                    $puedeRegresarDireccion = \Illuminate\Support\Facades\Gate::allows('regresarDireccion', $partida);
-                                    $puedeOperativos = $this->puedeGestionarOperativos($partida);
-                                    $puedeIniciar = \Illuminate\Support\Facades\Gate::allows('iniciarAtencion', $partida);
-                                    $puedeDevolver = \Illuminate\Support\Facades\Gate::allows('devolver', $partida);
-                                    $puedeReanudar = \Illuminate\Support\Facades\Gate::allows('reanudar', $partida);
-                                    $puedeConcluir = \Illuminate\Support\Facades\Gate::allows('concluir', $partida);
-                                    $puedeCancelar = \Illuminate\Support\Facades\Gate::allows('cancelar', $partida);
+                                    $acc = $accionesPorPartida[$partida->id] ?? [];
+                                    $puedeEditar = $acc['editar'] ?? false;
+                                    $puedeTurnar = $acc['turnar'] ?? false;
+                                    $puedeReturnar = $acc['returnar'] ?? false;
+                                    $puedeRegresarDireccion = $acc['regresar_direccion'] ?? false;
+                                    $puedeOperativos = $acc['operativos'] ?? false;
+                                    $puedeIniciar = $acc['iniciar'] ?? false;
+                                    $puedeDevolver = $acc['devolver'] ?? false;
+                                    $puedeReanudar = $acc['reanudar'] ?? false;
+                                    $puedeConcluir = $acc['concluir'] ?? false;
+                                    $puedeCancelar = $acc['cancelar'] ?? false;
                                     $estadoClave = $partida->estado?->clave;
                                 @endphp
                                 <tr wire:key="partida-row-{{ $partida->id }}" class="hover:bg-slate-50/70">
@@ -180,6 +193,12 @@
                                             <button type="button" wire:click="abrirDetalle({{ $partida->id }})" class="text-xs font-semibold text-slate-600 hover:text-slate-900">
                                                 Detalle
                                             </button>
+
+                                            @if ($puedeEditar)
+                                                <button type="button" wire:click="abrirEditarPreparacion({{ $partida->id }})" class="text-xs font-semibold text-indigo-700 hover:text-indigo-900">
+                                                    Preparar
+                                                </button>
+                                            @endif
 
                                             @if ($puedeTurnar)
                                                 <button type="button" wire:click="abrirTurnar({{ $partida->id }})" class="text-xs font-semibold text-siger-700 hover:text-siger-900">
@@ -267,8 +286,13 @@
                 <x-slot name="content">
                     <form wire:submit="ejecutarTurnado" id="form-turnado-partida" class="space-y-4">
                         @if ($partidaModal)
-                            <div class="rounded-lg bg-slate-50 border border-slate-200 p-3 text-xs text-slate-600 space-y-1">
+                            <div class="rounded-lg bg-slate-50 border border-slate-200 p-3 text-xs text-slate-600 space-y-1.5">
                                 <div class="font-semibold text-slate-800">{{ $partidaModal->concepto }}</div>
+                                @if ($partidaModal->observaciones)
+                                    <div class="rounded border border-amber-200 bg-amber-50 p-2 text-amber-900 whitespace-pre-line">
+                                        <span class="font-semibold">Observaciones:</span> {{ $partidaModal->observaciones }}
+                                    </div>
+                                @endif
                                 <div>
                                     @if ($modoTurnado === 'returnar')
                                         Departamento actual: <span class="font-semibold">{{ $partidaModal->departamento?->siglas }}</span>
@@ -277,6 +301,13 @@
                                         Si el expediente ya tiene folio en el departamento destino, se reutilizará; de lo contrario se generará uno nuevo (<span class="font-mono">SIGLA/MES/CONSECUTIVO/AA</span>).
                                     @endif
                                 </div>
+                                @if ($modoTurnado === 'turnar' && $partidaModal->tipo_servicio_id === null && \Illuminate\Support\Facades\Gate::allows('update', $partidaModal))
+                                    <div class="pt-1">
+                                        <button type="button" wire:click="abrirEditarPreparacion({{ $partidaModal->id }})" class="font-semibold text-indigo-700 hover:text-indigo-900 underline">
+                                            Falta tipo de servicio: haz clic aquí para completar datos antes de turnar →
+                                        </button>
+                                    </div>
+                                @endif
                             </div>
                         @endif
 
@@ -483,6 +514,13 @@
                                           class="mt-1 block w-full border-gray-300 focus:border-indigo-500 focus:ring-indigo-500 rounded-md shadow-sm text-sm"></textarea>
                                 <x-input-error for="conclusionForm.descripcion_trabajo" class="mt-1" />
                             </div>
+
+                            <div>
+                                <x-label for="evidencias_adq_files" value="Evidencias de entrega (vale firmado o fotografías, opcional — PDF/JPG/PNG)" />
+                                <input id="evidencias_adq_files" type="file" multiple accept=".pdf,.jpg,.jpeg,.png" wire:model="evidenciasConclusion"
+                                       class="mt-1 block w-full text-xs text-slate-600 file:me-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-siger-50 file:text-siger-700" />
+                                <x-input-error for="evidenciasConclusion" class="mt-1" />
+                            </div>
                         @else
                             <div>
                                 <x-label for="desc_trabajo" value="Descripción de los trabajos realizados *" />
@@ -648,6 +686,12 @@
                                     <div class="text-xs text-slate-400 font-semibold uppercase">Concepto</div>
                                     <div class="text-slate-800">{{ $partidaModal->concepto }}</div>
                                 </div>
+                                @if ($partidaModal->observaciones)
+                                    <div class="sm:col-span-2">
+                                        <div class="text-xs text-slate-400 font-semibold uppercase">Observaciones / Notas</div>
+                                        <div class="text-slate-700 whitespace-pre-line mt-0.5">{{ $partidaModal->observaciones }}</div>
+                                    </div>
+                                @endif
                             </div>
 
                             @if ($partidaModal->registroConclusion)
@@ -800,6 +844,80 @@
 
                 <x-slot name="footer">
                     <x-secondary-button wire:click="cerrarDetalle">Cerrar</x-secondary-button>
+                </x-slot>
+            </x-dialog-modal>
+
+            {{-- Modal Editar datos de preparación antes de turnar (RF-013 / RF-014) --}}
+            <x-dialog-modal wire:model.live="modalEditarPreparacionAbierto" maxWidth="xl">
+                <x-slot name="title">
+                    Preparar partida antes de turnar
+                    @if ($partidaModal) #{{ $partidaModal->numero_partida }} (Exp. #{{ $partidaModal->servicio_id }}) @endif
+                </x-slot>
+
+                <x-slot name="content">
+                    <form wire:submit="guardarPreparacion" id="form-preparar-partida" class="space-y-4">
+                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                            <div>
+                                <x-label for="prep_tipo" value="Tipo de servicio *" />
+                                <select id="prep_tipo" wire:model.live="preparacionForm.tipo_servicio_id"
+                                        class="mt-1 block w-full border-gray-300 focus:border-indigo-500 focus:ring-indigo-500 rounded-md shadow-sm text-sm">
+                                    <option value="">Selecciona un tipo...</option>
+                                    @foreach ($tiposServicioActivos as $tipo)
+                                        <option value="{{ $tipo->id }}">{{ $tipo->descripcion }}</option>
+                                    @endforeach
+                                </select>
+                                <x-input-error for="preparacionForm.tipo_servicio_id" class="mt-1" />
+                            </div>
+
+                            <div>
+                                <x-label for="prep_depto" value="Departamento propuesto" />
+                                <select id="prep_depto" wire:model="preparacionForm.departamento_id"
+                                        class="mt-1 block w-full border-gray-300 focus:border-indigo-500 focus:ring-indigo-500 rounded-md shadow-sm text-sm">
+                                    <option value="">Sin asignar</option>
+                                    @foreach ($departamentosActivos as $depto)
+                                        <option value="{{ $depto->id }}">{{ $depto->siglas }} — {{ $depto->nombre }}</option>
+                                    @endforeach
+                                </select>
+                                <x-input-error for="preparacionForm.departamento_id" class="mt-1" />
+                            </div>
+                        </div>
+
+                        <div>
+                            <x-label for="prep_concepto" value="Concepto *" />
+                            <textarea id="prep_concepto" rows="2" wire:model="preparacionForm.concepto"
+                                      class="mt-1 block w-full border-gray-300 focus:border-indigo-500 focus:ring-indigo-500 rounded-md shadow-sm text-sm"></textarea>
+                            <x-input-error for="preparacionForm.concepto" class="mt-1" />
+                        </div>
+
+                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                            <div>
+                                <x-label for="prep_cantidad" :value="$requiereCantidadPreparacion ? 'Cantidad solicitada *' : 'Cantidad solicitada'" />
+                                <x-input id="prep_cantidad" type="number" step="0.01" min="0.01" class="mt-1 block w-full" wire:model="preparacionForm.cantidad_solicitada" />
+                                <x-input-error for="preparacionForm.cantidad_solicitada" class="mt-1" />
+                            </div>
+
+                            <div>
+                                <x-label for="prep_unidad" :value="$requiereCantidadPreparacion ? 'Unidad de medida *' : 'Unidad de medida'" />
+                                <x-input id="prep_unidad" type="text" maxlength="100" class="mt-1 block w-full" wire:model="preparacionForm.unidad_medida" />
+                                <x-input-error for="preparacionForm.unidad_medida" class="mt-1" />
+                            </div>
+                        </div>
+
+                        <div>
+                            <x-label for="prep_obs" value="Observaciones" />
+                            <textarea id="prep_obs" rows="2" wire:model="preparacionForm.observaciones"
+                                      class="mt-1 block w-full border-gray-300 focus:border-indigo-500 focus:ring-indigo-500 rounded-md shadow-sm text-sm"></textarea>
+                            <x-input-error for="prep_obs" class="mt-1" />
+                            <x-input-error for="preparacionForm.observaciones" class="mt-1" />
+                        </div>
+                    </form>
+                </x-slot>
+
+                <x-slot name="footer">
+                    <x-secondary-button wire:click="cerrarModalEditarPreparacion">Cancelar</x-secondary-button>
+                    <x-button class="ms-3" type="submit" form="form-preparar-partida" wire:loading.attr="disabled">
+                        Guardar preparación
+                    </x-button>
                 </x-slot>
             </x-dialog-modal>
         </div>

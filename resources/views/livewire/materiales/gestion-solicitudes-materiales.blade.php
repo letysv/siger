@@ -170,6 +170,11 @@
                                                 Enviada: {{ $sol->fecha_envio->format('d/m/Y H:i') }}
                                             </div>
                                         @endif
+                                        @if ($sol->estado === 'ENVIADA' && $sol->partidaOriginal?->estado?->clave !== 'EN_ATENCION')
+                                            <div class="text-[11px] font-semibold text-amber-700 mt-1">
+                                                En pausa: partida origen {{ $sol->partidaOriginal?->estado?->nombre }}
+                                            </div>
+                                        @endif
                                     </td>
 
                                     <td class="px-6 py-3.5 whitespace-nowrap text-xs">
@@ -450,10 +455,10 @@
                         </div>
 
                         <div>
-                            <x-label for="aut_tipo" value="Tipo de servicio (opcional)" />
+                            <x-label for="aut_tipo" value="Tipo de servicio *" />
                             <select id="aut_tipo" wire:model.live="autorizacionForm.tipo_servicio_id"
                                     class="mt-1 block w-full border-gray-300 focus:border-indigo-500 focus:ring-indigo-500 rounded-md shadow-sm text-sm">
-                                <option value="">Sin especificar por ahora...</option>
+                                <option value="">Selecciona el tipo de servicio...</option>
                                 @foreach ($tiposServicioActivos as $tipo)
                                     <option value="{{ $tipo->id }}">
                                         {{ $tipo->descripcion }} @if ($tipo->requiere_cantidad) (requiere cantidad) @endif
